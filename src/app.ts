@@ -18,7 +18,14 @@ const io = new Server(httpServer, {
 });
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+            "connect-src": ["'self'", "ws:", "wss:", "https://*"],
+        },
+    },
+}));
 app.use(cors());
 app.use(express.json());
 
