@@ -44,7 +44,7 @@ const frontendPath = path.join(__dirname, '../frontend/dist');
 app.use(express.static(frontendPath));
 
 // Fallback for SPA
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
     if (req.path.startsWith('/v1/') || req.path.startsWith('/admin/')) {
         return res.status(404).json({ error: 'Not Found' });
     }
