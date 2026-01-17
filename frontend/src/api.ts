@@ -26,13 +26,14 @@ export const adminApi = {
     updateMerchant: (id: string, config: any) => adminApiInstance.put(`/merchants/${id}`, { config }),
     deleteMerchant: (id: string) => adminApiInstance.delete(`/merchants/${id}`),
 
-    createMarket: (data: { title: string; durationSeconds: number; initYes: number; initNo: number, category?: string }) =>
+    createMarket: (data: { title: string; durationSeconds: number; initYes: number; initNo: number, category?: string, term?: string }) =>
         adminApiInstance.post('/markets', data),
     listMarkets: () => adminApiInstance.get('/markets'),
     updateMarket: (id: string, data: any) => adminApiInstance.put(`/markets/${id}`, data),
     deleteMarket: (id: string) => adminApiInstance.delete(`/markets/${id}`),
 
     runScout: (query?: string) => adminApiInstance.post('/scout', { query }),
+    previewScout: (query?: string) => adminApiInstance.post('/scout/preview', { query }),
     getMeta: () => adminApiInstance.get('/meta'),
     listWagers: () => adminApiInstance.get('/wagers'),
     getLogs: () => adminApiInstance.get('/logs'),
@@ -42,4 +43,5 @@ export const adminApi = {
     resolveMarket: (id: string) => adminApiInstance.post(`/markets/${id}/resolve`),
     getWebhookLogs: () => adminApiInstance.get('/webhooks/logs'),
     getMarketPayouts: (id: string) => adminApiInstance.get(`/markets/${id}/payouts`),
+    getTrends: () => adminApiInstance.get('/trends'),
 };

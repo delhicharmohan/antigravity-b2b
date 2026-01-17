@@ -78,6 +78,12 @@ export default function MarketManager() {
     const [categoryFilter, setCategoryFilter] = useState('All');
     const [termFilter, setTermFilter] = useState('All');
     const [scoutQuery, setScoutQuery] = useState('');
+    const [trends, setTrends] = useState<any>(null);
+    const [loadingTrends, setLoadingTrends] = useState(false);
+    const [showTrends, setShowTrends] = useState(false);
+    const [scoutPreviewMarkets, setScoutPreviewMarkets] = useState<any[]>([]);
+    const [showScoutPreview, setShowScoutPreview] = useState(false);
+    const [isSavingAll, setIsSavingAll] = useState(false);
 
     const CATEGORIES = ['Crypto', 'Finance', 'NFL', 'NBA', 'Cricket', 'Football', 'Politics', 'Election', 'Other'];
     const TERMS = ['Ultra Short', 'Short', 'Long'];
@@ -105,13 +111,65 @@ export default function MarketManager() {
     const handleRunScout = async () => {
         setIsRunning(true);
         try {
-            await adminApi.runScout(scoutQuery);
-            alert('AI Scout initiated! Markets will appear shortly.');
+            const res = await adminApi.previewScout(scoutQuery);
+            setScoutPreviewMarkets(res.data);
+            setShowScoutPreview(true);
             setScoutQuery('');
+            setShowTrends(false);
+        } catch (error) {
+            console.error(error);
+            alert('Failed to generate preview markets');
+        } finally {
+            setIsRunning(false);
+        }
+    };
+
+    const handleSaveScoutedMarkets = async () => {
+        setIsSavingAll(true);
+        try {
+            for (const m of scoutPreviewMarkets) {
+                const resolutionTime = new Date(m.event_resolution_timestamp).getTime();
+                const totalLiquid = Math.floor(m.confidence_score * 2000);
+                const probYes = m.initial_probability_yes || 0.5;
+                const liqYes = Math.floor(totalLiquid * probYes);
+                const liqNo = totalLiquid - liqYes;
+
+                // Betting closes 30 mins before resolution, with a minimum of 60 seconds duration
+                const durationSeconds = Math.max(60, Math.floor((resolutionTime - Date.now() - (30 * 60 * 1000)) / 1000));
+
+                await adminApi.createMarket({
+                    title: m.market_title,
+                    durationSeconds,
+                    initYes: liqYes,
+                    initNo: liqNo,
+                    category: m.category,
+                    term: m.term
+                });
+            }
+            setShowScoutPreview(false);
+            fetchMarkets();
+        } catch (error) {
+            console.error(error);
+            alert('Failed to save some markets');
+        } finally {
+            setIsSavingAll(false);
+        }
+    };
+
+    const handleFetchTrends = async () => {
+        if (trends) {
+            setShowTrends(!showTrends);
+            return;
+        }
+        setLoadingTrends(true);
+        setShowTrends(true);
+        try {
+            const res = await adminApi.getTrends();
+            setTrends(res.data);
         } catch (error) {
             console.error(error);
         } finally {
-            setIsRunning(false);
+            setLoadingTrends(false);
         }
     };
 
@@ -216,14 +274,82 @@ export default function MarketManager() {
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
                             AI Agent
                         </div>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <input
-                                className="input-glow"
-                                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', width: '200px' }}
-                                placeholder="Scout intent (e.g. Cricket jan 3)"
-                                value={scoutQuery}
-                                onChange={e => setScoutQuery(e.target.value)}
-                            />
+                        <div style={{ display: 'flex', gap: '0.5rem', position: 'relative' }}>
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    className="input-glow"
+                                    style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', width: '220px' }}
+                                    placeholder="Scout intent..."
+                                    value={scoutQuery}
+                                    onFocus={() => !trends && handleFetchTrends()}
+                                    onChange={e => setScoutQuery(e.target.value)}
+                                />
+                                {showTrends && (
+                                    <div className="glass-card animate-slide-up" style={{
+                                        position: 'absolute',
+                                        top: '100%',
+                                        right: 0,
+                                        width: '350px',
+                                        marginTop: '0.75rem',
+                                        zIndex: 100,
+                                        padding: '1.25rem',
+                                        boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        maxHeight: '400px',
+                                        overflowY: 'auto'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <TrendingUp size={14} />
+                                                Live Trends (AI)
+                                            </div>
+                                            <button onClick={() => setShowTrends(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}><X size={14} /></button>
+                                        </div>
+
+                                        {loadingTrends ? (
+                                            <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                <div className="spinning" style={{ display: 'inline-block', marginBottom: '0.5rem' }}><Sparkles size={16} /></div>
+                                                <div>Analyzing global feeds...</div>
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                                <div>
+                                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase' }}>X & Google Trending</div>
+                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                                        {[...(trends?.x || []), ...(trends?.google || [])].slice(0, 10).map((t, i) => (
+                                                            <button
+                                                                key={i}
+                                                                onClick={() => setScoutQuery(t)}
+                                                                style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)', color: 'white', borderRadius: '6px', padding: '0.2rem 0.5rem', fontSize: '0.75rem', cursor: 'pointer' }}
+                                                            >
+                                                                {t}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase' }}>AI Recommendations</div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                                        {trends?.ai_recommendations?.map((r: any, i: number) => (
+                                                            <div
+                                                                key={i}
+                                                                onClick={() => setScoutQuery(r.keyword)}
+                                                                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '0.6rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                                                                onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+                                                                onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'}
+                                                            >
+                                                                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'white' }}>{r.keyword}</div>
+                                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.2rem', lineHeight: 1.3 }}>{r.context}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                             <button
                                 onClick={handleRunScout}
                                 disabled={isRunning}
@@ -231,7 +357,7 @@ export default function MarketManager() {
                                 style={{ padding: '0.6rem 1rem', fontSize: '0.85rem', whiteSpace: 'nowrap' }}
                             >
                                 <Sparkles size={16} />
-                                {isRunning ? 'Running...' : 'Run Scout'}
+                                {isRunning ? 'Scouting...' : 'Run Scout'}
                             </button>
                         </div>
                         {lastRun && (
@@ -402,7 +528,8 @@ export default function MarketManager() {
                             <tr>
                                 <th>Proposition</th>
                                 <th>Status</th>
-                                <th>Liquidity Pools</th>
+                                <th>Probability (Y/N)</th>
+                                <th>Odds (Y/N)</th>
                                 <th>Volume</th>
                                 <th>Confidence</th>
                                 <th>Timeline</th>
@@ -455,8 +582,18 @@ export default function MarketManager() {
                                         </td>
                                         <td>
                                             <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
-                                                <div style={{ color: '#4ade80' }}>Y: {Number(m.pool_yes).toLocaleString()}</div>
-                                                <div style={{ color: '#f87171' }}>N: {Number(m.pool_no).toLocaleString()}</div>
+                                                <div style={{ color: '#4ade80', fontWeight: 700 }}>{((m.probabilities?.yes ?? 0) * 100).toFixed(1)}%</div>
+                                                <div style={{ color: '#f87171', fontWeight: 700 }}>{((m.probabilities?.no ?? 0) * 100).toFixed(1)}%</div>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                                <span>Y: {Number(m.pool_yes || 0).toLocaleString()}</span>
+                                                <span>N: {Number(m.pool_no || 0).toLocaleString()}</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
+                                                <div style={{ color: '#4ade80' }}>{(m.odds?.yes ?? 0).toFixed(2)}x</div>
+                                                <div style={{ color: '#f87171' }}>{(m.odds?.no ?? 0).toFixed(2)}x</div>
                                             </div>
                                         </td>
                                         <td className="mono">${Number(m.total_pool).toLocaleString()}</td>
@@ -596,6 +733,93 @@ export default function MarketManager() {
                         <p style={{ marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             Warning: Manual settlement is final and will trigger payouts immediately.
                         </p>
+                    </div>
+                </div>
+            )}
+
+            {showScoutPreview && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="glass-card animate-scale-up" style={{ width: '1000px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ padding: '2rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <Sparkles size={24} color="#8b5cf6" />
+                                    AI Scout Preview
+                                </h2>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Review and edit AI-generated markets before saving to database</p>
+                            </div>
+                            <button onClick={() => setShowScoutPreview(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={24} /></button>
+                        </div>
+
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {scoutPreviewMarkets.map((m, idx) => (
+                                    <div key={idx} className="glass-card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', display: 'grid', gridTemplateColumns: '1fr 150px 150px 80px', gap: '1rem', alignItems: 'center' }}>
+                                        <div>
+                                            <input
+                                                className="input-glow"
+                                                style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem' }}
+                                                value={m.market_title}
+                                                onChange={e => {
+                                                    const newMarkets = [...scoutPreviewMarkets];
+                                                    newMarkets[idx].market_title = e.target.value;
+                                                    setScoutPreviewMarkets(newMarkets);
+                                                }}
+                                            />
+                                            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                <span>Probability: {(m.initial_probability_yes * 100).toFixed(0)}% YES</span>
+                                                <span>Confidence: {(m.confidence_score * 100).toFixed(0)}%</span>
+                                                <span>Resolves: {new Date(m.event_resolution_timestamp).toLocaleDateString()}</span>
+                                            </div>
+                                        </div>
+                                        <select
+                                            className="input-glow"
+                                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', background: 'var(--bg-dark)' }}
+                                            value={m.category}
+                                            onChange={e => {
+                                                const newMarkets = [...scoutPreviewMarkets];
+                                                newMarkets[idx].category = e.target.value;
+                                                setScoutPreviewMarkets(newMarkets);
+                                            }}
+                                        >
+                                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <select
+                                            className="input-glow"
+                                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', background: 'var(--bg-dark)' }}
+                                            value={m.term}
+                                            onChange={e => {
+                                                const newMarkets = [...scoutPreviewMarkets];
+                                                newMarkets[idx].term = e.target.value;
+                                                setScoutPreviewMarkets(newMarkets);
+                                            }}
+                                        >
+                                            {TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+                                        </select>
+                                        <button
+                                            onClick={() => {
+                                                const newMarkets = scoutPreviewMarkets.filter((_, i) => i !== idx);
+                                                setScoutPreviewMarkets(newMarkets);
+                                            }}
+                                            style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                                        >
+                                            <Trash2 size={20} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '2rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                            <button onClick={() => setShowScoutPreview(false)} className="btn-premium" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>Cancel</button>
+                            <button
+                                onClick={handleSaveScoutedMarkets}
+                                disabled={isSavingAll || scoutPreviewMarkets.length === 0}
+                                className="btn-premium"
+                            >
+                                {isSavingAll ? 'Saving Markets...' : `Save All ${scoutPreviewMarkets.length} Markets`}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

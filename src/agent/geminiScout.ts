@@ -8,7 +8,9 @@ const MOCK_MARKETS = [
         event_resolution_timestamp: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         source_of_truth: "CoinMarketCap official price data",
         confidence_score: 0.85,
-        category: "Crypto"
+        category: "Crypto",
+        term: "Ultra Short",
+        initial_probability_yes: 0.55
     }
 ];
 
@@ -41,9 +43,13 @@ const marketSchema = {
             term: {
                 type: SchemaType.STRING,
                 description: "The term of the market: 'Ultra Short' (<7 days), 'Short' (8-21 days), or 'Long' (28-90 days)."
+            },
+            initial_probability_yes: {
+                type: SchemaType.NUMBER,
+                description: "The estimated probability (0.05 to 0.95) that the 'Yes' outcome will occur based on current data."
             }
         },
-        required: ["market_title", "event_resolution_timestamp", "source_of_truth", "confidence_score", "category", "term"]
+        required: ["market_title", "event_resolution_timestamp", "source_of_truth", "confidence_score", "category", "term", "initial_probability_yes"]
     }
 };
 
@@ -146,7 +152,8 @@ export class GeminiScout {
             "source_of_truth": "URL",
             "confidence_score": 0.85,
             "category": "...",
-            "term": "Ultra Short" | "Short" | "Long"
+            "term": "Ultra Short" | "Short" | "Long",
+            "initial_probability_yes": 0.65
           }
         ]
         `;
@@ -166,6 +173,52 @@ export class GeminiScout {
         } catch (error) {
             console.error("[Scout] Generation failed:", error);
             return MOCK_MARKETS;
+        }
+    }
+
+    async getTrends(): Promise<any> {
+        if (!this.model) {
+            return {
+                x: ["#Bitcoin", "#FedRate", "#ChampionsLeague"],
+                google: ["Stock Market Today", "IPL Schedule", "US Election"],
+                news: ["AI Regulations", "Global Inflation", "Tech Earnings"],
+                ai_recommendations: [
+                    { keyword: "NVIDIA Earnings", context: "Anticipation for quarterly results driving tech sector volatility." },
+                    { keyword: "OPEC+ Meeting", context: "Potential oil supply cuts affecting global energy prices." }
+                ]
+            };
+        }
+
+        const prompt = `
+        You are a Trend Analysis Agent. 
+        You MUST use Google Search to find ACTUAL, REAL-TIME trending keywords, topics, and events (as of today, ${new Date().toISOString().split('T')[0]}) from:
+        1. X (formerly Twitter) Trending Topics
+        2. Google Trends (Global and regional highlights)
+        3. Global News (Finance, Tech, Sports, Politics)
+
+        Provide a categorized list of high-impact keywords that would make excellent binary prediction markets.
+        Focus on events resolving within the next 1-90 days.
+
+        Return ONLY a JSON object with this structure:
+        {
+          "x": ["keyword1", "keyword2", ...],
+          "google": ["keyword1", "keyword2", ...],
+          "news": ["keyword1", "keyword2", ...],
+          "ai_recommendations": [
+            {"keyword": "...", "context": "Brief context on why it's trending"}
+          ]
+        }
+        `;
+
+        try {
+            console.log("[Scout] Fetching real-time trends using Google Search grounding...");
+            const result = await this.model.generateContent(prompt);
+            const text = result.response.text();
+            const cleanText = text.replace(/```json|```/g, '').trim();
+            return JSON.parse(cleanText);
+        } catch (error) {
+            console.error("[Scout] Trends fetch failed:", error);
+            return { x: [], google: [], news: [], ai_recommendations: [] };
         }
     }
 
@@ -203,14 +256,20 @@ export class GeminiScout {
                 const closureTime = resolutionTime - (30 * 60 * 1000);
 
                 try {
-                    // Logic: Initialize pools based on confidence score
-                    const liquidity = Math.floor(m.confidence_score * 1000);
+                    // Logic: Initialize pools based on confidence score and initial probability
+                    const totalLiquidity = Math.floor(m.confidence_score * 2000);
+                    const probYes = m.initial_probability_yes || 0.5;
+
+                    // We want: poolYes / (poolYes + poolNo) = probYes
+                    // So poolYes = totalLiquidity * probYes
+                    const liquidityYes = Math.floor(totalLiquidity * probYes);
+                    const liquidityNo = totalLiquidity - liquidityYes;
 
                     const created = await createMarketService(
                         m.market_title,
                         closureTime,
-                        liquidity,
-                        liquidity,
+                        liquidityYes,
+                        liquidityNo,
                         m.source_of_truth,
                         m.confidence_score,
                         resolutionTime,

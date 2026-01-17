@@ -39,6 +39,10 @@ export const listMarkets = async (req: Request, res: Response) => {
                 odds: {
                     yes: Totalisator.calculateOdds(pool, 'yes', rake),
                     no: Totalisator.calculateOdds(pool, 'no', rake)
+                },
+                probabilities: {
+                    yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
+                    no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
                 }
             };
         });
@@ -77,6 +81,10 @@ export const getMarketDetails = async (req: Request, res: Response) => {
             odds: {
                 yes: Totalisator.calculateOdds(pool, 'yes', rake),
                 no: Totalisator.calculateOdds(pool, 'no', rake)
+            },
+            probabilities: {
+                yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
+                no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
             }
         };
 

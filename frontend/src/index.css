@@ -306,3 +306,18 @@ tr:hover td {
 .animate-scale-up {
   animation: scaleUp 0.3s ease-out forwards;
 }
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1.5s linear infinite;
+  display: inline-block;
+}

@@ -22,10 +22,13 @@ export default function Dashboard() {
         setLoading(true);
         try {
             const wagersRes = await adminApi.listWagers();
-            setRecentWagers(wagersRes.data.slice(0, 5));
+            const wagersData = Array.isArray(wagersRes.data) ? wagersRes.data : [];
+            setRecentWagers(wagersData.slice(0, 5));
 
             const statsRes = await adminApi.getStats(selectedDate);
-            setDashboardStats(statsRes.data);
+            if (statsRes.data && typeof statsRes.data === 'object' && !Array.isArray(statsRes.data)) {
+                setDashboardStats(statsRes.data);
+            }
         } catch (error) {
             console.error(error);
         } finally {
@@ -46,28 +49,28 @@ export default function Dashboard() {
     const metrics = [
         {
             label: 'Markets Open',
-            value: dashboardStats.open_markets_count,
+            value: dashboardStats?.open_markets_count ?? 0,
             icon: Store,
             color: '#10b981',
             detail: 'Live on Network'
         },
         {
             label: 'Active Pool',
-            value: `$${(isToday ? dashboardStats.active_pool : dashboardStats.historical_active_pool).toLocaleString()}`,
+            value: `$${(isToday ? (dashboardStats?.active_pool ?? 0) : (dashboardStats?.historical_active_pool ?? 0)).toLocaleString()}`,
             icon: Wallet,
             color: '#8b5cf6',
             detail: isToday ? 'Current TVL' : 'Est. Pool on Date'
         },
         {
             label: 'Pool Volume',
-            value: `$${dashboardStats.total_volume.toLocaleString()}`,
+            value: `$${(dashboardStats?.total_volume ?? 0).toLocaleString()}`,
             icon: BarChart3,
             color: '#3b82f6',
             detail: 'Cumulative Stake'
         },
         {
             label: 'Settle Today',
-            value: dashboardStats.settle_today_count,
+            value: dashboardStats?.settle_today_count ?? 0,
             icon: Target,
             color: '#f59e0b',
             detail: 'Scheduled for Resolution'

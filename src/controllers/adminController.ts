@@ -78,7 +78,32 @@ export const createMarket = async (req: Request, res: Response) => {
 export const listMarkets = async (req: Request, res: Response) => {
     try {
         const result = await query('SELECT * FROM markets ORDER BY id DESC');
-        res.json(result.rows);
+
+        const { Totalisator } = await import('../core/totalisator');
+
+        const markets = result.rows.map(m => {
+            const pool = {
+                yes: parseFloat(m.pool_yes),
+                no: parseFloat(m.pool_no)
+            };
+
+            // For admin view, we use a default platform rake or 0 for raw odds
+            const rake = 0.05;
+
+            return {
+                ...m,
+                odds: {
+                    yes: Totalisator.calculateOdds(pool, 'yes', rake),
+                    no: Totalisator.calculateOdds(pool, 'no', rake)
+                },
+                probabilities: {
+                    yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
+                    no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
+                }
+            };
+        });
+
+        res.json(markets);
     } catch (error: any) {
         console.error('List Markets Error:', error);
         res.status(500).json({ error: 'Failed to list markets' });
@@ -195,6 +220,18 @@ export const runScout = async (req: Request, res: Response) => {
     }
 };
 
+export const previewScout = async (req: Request, res: Response) => {
+    const { query: intent, count } = req.body;
+    try {
+        const scout = new GeminiScout(process.env.GEMINI_API_KEY);
+        const markets = await scout.generateMarkets(intent, count ? Number(count) : undefined);
+        res.json(markets);
+    } catch (error: any) {
+        console.error('Preview Scout Error:', error);
+        res.status(500).json({ error: 'Failed to generate preview markets' });
+    }
+};
+
 export const settleMarketController = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { outcome } = req.body;
@@ -239,7 +276,7 @@ export const listWagers = async (req: Request, res: Response) => {
             ORDER BY w.created_at DESC
             LIMIT 100
         `);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (error: any) {
         console.error('List Wagers Error:', error);
         res.status(500).json({ error: 'Failed to list wagers' });
@@ -448,5 +485,16 @@ export const getMarketPayoutSummary = async (req: Request, res: Response) => {
     } catch (error: any) {
         console.error('Payout Summary Error:', error);
         res.status(500).json({ error: 'Failed to fetch payout summary' });
+    }
+};
+
+export const getTrends = async (req: Request, res: Response) => {
+    try {
+        const scout = new GeminiScout(process.env.GEMINI_API_KEY);
+        const trends = await scout.getTrends();
+        res.json(trends);
+    } catch (error: any) {
+        console.error('Get Trends Error:', error);
+        res.status(500).json({ error: 'Failed to fetch trends' });
     }
 };
