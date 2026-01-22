@@ -103,10 +103,43 @@ CREATE TABLE IF NOT EXISTS system_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- === NEW FEATURES ===
+
+-- Add balance to merchants
+DO $$
+BEGIN
+    ALTER TABLE merchants ADD COLUMN balance DECIMAL(20, 2) DEFAULT 0;
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Transactions table
+CREATE TABLE IF NOT EXISTS transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id UUID NOT NULL REFERENCES merchants(id),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('DEPOSIT', 'WITHDRAWAL', 'WAGER', 'PAYOUT', 'REFUND')),
+    amount DECIMAL(20, 2) NOT NULL,
+    balance_after DECIMAL(20, 2) NOT NULL,
+    reference_id UUID,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add idempotency_key to wagers
+DO $$
+BEGIN
+    ALTER TABLE wagers ADD COLUMN idempotency_key VARCHAR(255);
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wagers_idempotency ON wagers(merchant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+
 -- Seed Data
-INSERT INTO merchants (api_key_hash, raw_api_key, config) VALUES 
-('62c66221e60cc0d091bc3e12a8de7a6bc4dfeb93967d3f29da44dad679549344', 'test_key', '{"default_rake": 0.05}')
-ON CONFLICT (api_key_hash) DO NOTHING;
+INSERT INTO merchants (api_key_hash, raw_api_key, config, balance) VALUES
+('62c66221e60cc0d091bc3e12a8de7a6bc4dfeb93967d3f29da44dad679549344', 'test_key', '{"default_rake": 0.05}', 10000.00)
+ON CONFLICT (api_key_hash) DO UPDATE SET balance = 10000.00;
 
 -- Sample market with predictable ID for testing if needed
 INSERT INTO markets (id, title, status, closure_timestamp, resolution_timestamp, pool_yes, pool_no) VALUES
