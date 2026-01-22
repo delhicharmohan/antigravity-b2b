@@ -6,6 +6,7 @@ import { Totalisator } from '../core/totalisator';
 export const placeWager = async (req: Request, res: Response) => {
     const { marketId, selection, stake, userId } = req.body;
     const merchant = req.merchant;
+    const idempotencyKey = req.header('Idempotency-Key');
 
     if (!marketId || !selection || !stake || stake <= 0) {
         return res.status(400).json({ error: 'Invalid wager parameters' });
@@ -19,6 +20,27 @@ export const placeWager = async (req: Request, res: Response) => {
 
     try {
         await client.query('BEGIN');
+
+        // 1. Idempotency Check
+        if (idempotencyKey) {
+            const existingWagerRes = await client.query(
+                'SELECT * FROM wagers WHERE merchant_id = $1 AND idempotency_key = $2',
+                [merchant.id, idempotencyKey]
+            );
+
+            if (existingWagerRes.rows.length > 0) {
+                await client.query('ROLLBACK');
+                const w = existingWagerRes.rows[0];
+                return res.status(200).json({
+                    status: 'accepted',
+                    wagerId: w.id,
+                    marketId: w.market_id,
+                    stake: Number(w.stake),
+                    selection: w.selection,
+                    message: "Idempotent response: Wager already processed"
+                });
+            }
+        }
 
         // Lock the market row for update to ensure consistency
         const marketRes = await client.query(
@@ -40,23 +62,45 @@ export const placeWager = async (req: Request, res: Response) => {
             throw new Error('Betting window has closed for this event.');
         }
 
-        // Insert Wager
+        // 2. Balance Check & Deduct
+        const deductRes = await client.query(
+            `UPDATE merchants
+             SET balance = balance - $1
+             WHERE id = $2 AND balance >= $1
+             RETURNING balance`,
+            [stake, merchant.id]
+        );
+
+        if (deductRes.rows.length === 0) {
+            throw new Error('Insufficient funds');
+        }
+
+        const newBalance = Number(deductRes.rows[0].balance);
+
+        // 3. Insert Wager
         const wagerRes = await client.query(
-            `INSERT INTO wagers (merchant_id, market_id, selection, stake, external_user_id) 
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-            [merchant.id, marketId, selection.toLowerCase(), stake, userId]
+            `INSERT INTO wagers (merchant_id, market_id, selection, stake, external_user_id, idempotency_key)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [merchant.id, marketId, selection.toLowerCase(), stake, userId, idempotencyKey]
+        );
+        const wagerId = wagerRes.rows[0].id;
+
+        // 4. Record Transaction
+        await client.query(
+            `INSERT INTO transactions (merchant_id, type, amount, balance_after, reference_id, description)
+             VALUES ($1, 'WAGER', $2, $3, $4, $5)`,
+            [merchant.id, stake, newBalance, wagerId, `Wager on market ${marketId}`]
         );
 
         // Update Market Pool
         const poolCol = selection.toLowerCase() === 'yes' ? 'pool_yes' : 'pool_no';
 
-        // Postgres updates decimals as string often, cast explicitly or let driver handle
         const updateRes = await client.query(
             `UPDATE markets 
-         SET ${poolCol} = ${poolCol} + $1,
-             volume_24h = volume_24h + $1
-         WHERE id = $2
-         RETURNING pool_yes, pool_no, total_pool`,
+             SET ${poolCol} = ${poolCol} + $1,
+                 volume_24h = volume_24h + $1
+             WHERE id = $2
+             RETURNING pool_yes, pool_no, total_pool`,
             [stake, marketId]
         );
 
@@ -83,7 +127,7 @@ export const placeWager = async (req: Request, res: Response) => {
 
         res.status(201).json({
             status: 'accepted',
-            wagerId: wagerRes.rows[0].id,
+            wagerId: wagerId,
             marketId,
             stake,
             selection,
@@ -93,7 +137,13 @@ export const placeWager = async (req: Request, res: Response) => {
     } catch (error: any) {
         await client.query('ROLLBACK');
         console.error('Wager Error:', error);
-        const status = error.message === 'Market not found' ? 404 : 400;
+
+        let status = 500;
+        if (error.message === 'Market not found') status = 404;
+        else if (error.message === 'Insufficient funds') status = 402; // Payment Required
+        else if (error.message.includes('Market is')) status = 400;
+        else status = 400;
+
         res.status(status).json({ error: error.message || 'Failed to place wager' });
     } finally {
         client.release();

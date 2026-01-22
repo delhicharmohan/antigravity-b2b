@@ -5,6 +5,7 @@ export interface Merchant {
         default_rake: number;
         allowed_categories: string[];
     };
+    balance: number;
 }
 
 export interface Market {
@@ -29,4 +30,16 @@ export interface Wager {
     stake: number;
     timestamp: number;
     status: 'ACCEPTED' | 'REJECTED';
+    idempotency_key?: string;
+}
+
+export interface Transaction {
+    id: string;
+    merchant_id: string;
+    type: 'DEPOSIT' | 'WITHDRAWAL' | 'WAGER' | 'PAYOUT' | 'REFUND';
+    amount: number;
+    balance_after: number;
+    reference_id?: string;
+    description?: string;
+    created_at: number;
 }
