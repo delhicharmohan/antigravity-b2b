@@ -60,6 +60,9 @@ Fetch all active prediction markets available for betting.
         *   `RESOLVING`: Closed markets where the outcome is being determined.
 *   **Response**: `Array<Market>`
 
+> [!NOTE]
+> Markets enter a **Cooling-off Period** 5 minutes before their `closure_timestamp`. During this window, no new wagers will be accepted to prevent "pool sniping."
+
 **Market Object Schema:**
 ```json
 {
@@ -84,7 +87,10 @@ Place a bet on a specific market outcome.
     *   `marketId` (UUID): The ID of the market.
     *   `selection` (String): `"yes"` or `"no"`.
     *   `stake` (Number): The amount to wager (e.g., `100.50`).
-    *   `userId` (String, Optional): Your internal user ID (e.g., Firebase UID). This will be echoed back in the settlement webhook.
+    *   `userId` (String, Optional): Your internal user ID (e.g., Firebase UID). This will be echoed back in the settlement webhook for your payout processing.
+
+> [!IMPORTANT]
+> **Liquidity Guard**: To protect the integrity of the Pari-mutuel pool, no single wager may exceed **50% of the current total pool** at the time of placement. 
 
 **Success Response (201 Created):**
 ```json
@@ -94,9 +100,19 @@ Place a bet on a specific market outcome.
   "marketId": "market-uuid",
   "stake": 100.50,
   "selection": "yes",
-  "odds": {
-    "yes": 1.85,
-    "no": 2.10
+  "metrics": {
+    "yes": {
+      "decimalOdds": 1.85,
+      "probability": "54%",
+      "sharePrice": 0.54,
+      "payoutPerTen": 18.50
+    },
+    "no": {
+      "decimalOdds": 2.15,
+      "probability": "46%",
+      "sharePrice": 0.46,
+      "payoutPerTen": 21.50
+    }
   }
 }
 ```
@@ -107,8 +123,10 @@ Place a bet on a specific market outcome.
 
 If you have configured a `webhook_url` in your merchant settings, Antigravity will push POST notifications to your server when events occur.
 
-### Settlement Notification
-Sent immediately when a market status changes to "SETTLED".
+### Settlement & Payout Notification
+Sent immediately when a market status changes to "SETTLED". Use this to credit your users' wallets.
+
+*   **Pari-mutuel Payouts**: The `payout` field in each wager object is the final amount to credit, calculated after the platform rake and rounded down to the nearest cent.
 
 *   **Method**: `POST`
 *   **Headers**:

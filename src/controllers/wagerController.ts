@@ -77,6 +77,24 @@ export const placeWager = async (req: Request, res: Response) => {
 
         const newBalance = Number(deductRes.rows[0].balance);
 
+        // --- Security Hardenings ---
+
+        // 1. Cooling-off Period (Anti-Sniping)
+        // Block betting 5 minutes before the technical closure timestamp
+        const COOLING_OFF_MS = 5 * 60 * 1000;
+        if (Date.now() > (Number(marketData.closure_timestamp) - COOLING_OFF_MS)) {
+            throw new Error('Market is in cooling-off period. New wagers are no longer accepted.');
+        }
+
+        // 2. Liquidity Guard (Anti-Manipulation)
+        // Prevent a single bet from exceeding 50% of the CURRENT total pool to avoid extreme odds skew
+        const currentTotalPool = Number(marketData.pool_yes) + Number(marketData.pool_no);
+        const MAX_WAGER_PERCENT = 0.5;
+        // Only apply if there is existing liquidity to avoid blocking initial bets
+        if (currentTotalPool > 0 && stake > (currentTotalPool * MAX_WAGER_PERCENT)) {
+            throw new Error(`Wager too large relative to pool liquidity. Maximum allowed is ${currentTotalPool * MAX_WAGER_PERCENT}`);
+        }
+
         // 3. Insert Wager
         const wagerRes = await client.query(
             `INSERT INTO wagers (merchant_id, market_id, selection, stake, external_user_id, idempotency_key)
@@ -115,14 +133,14 @@ export const placeWager = async (req: Request, res: Response) => {
         const totalPool = Number(updateRes.rows[0].total_pool);
 
         const merchantRake = merchant.config?.default_rake;
-        const yesOdds = Totalisator.calculateOdds(newPool, 'yes', merchantRake);
-        const noOdds = Totalisator.calculateOdds(newPool, 'no', merchantRake);
+        const yesMetrics = Totalisator.getMarketMetrics(newPool, 'yes', merchantRake);
+        const noMetrics = Totalisator.getMarketMetrics(newPool, 'no', merchantRake);
 
         emitOddsUpdate(marketId, {
             marketId,
             pool_data: newPool,
             total_pool: totalPool,
-            odds: { yes: yesOdds, no: noOdds }
+            metrics: { yes: yesMetrics, no: noMetrics }
         });
 
         res.status(201).json({
@@ -131,7 +149,7 @@ export const placeWager = async (req: Request, res: Response) => {
             marketId,
             stake,
             selection,
-            odds: { yes: yesOdds, no: noOdds }
+            metrics: { yes: yesMetrics, no: noMetrics }
         });
 
     } catch (error: any) {

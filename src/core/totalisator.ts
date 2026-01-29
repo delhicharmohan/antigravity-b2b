@@ -24,7 +24,38 @@ export class Totalisator {
     }
 
     /**
+     * Returns a comprehensive metrics object for a market outcome.
+     * Useful for premium merchant frontends.
+     */
+    public static getMarketMetrics(
+        poolData: { yes: number; no: number },
+        outcome: 'yes' | 'no',
+        merchantRake?: number
+    ) {
+        const decimalOdds = this.calculateOdds(poolData, outcome, merchantRake);
+        const totalPool = poolData.yes + poolData.no;
+
+        // Implied Probability (based on pool weight)
+        const probability = totalPool > 0
+            ? Math.round((poolData[outcome] / totalPool) * 100)
+            : 50;
+
+        // Share Price (Price for $1.00 payout, 0.00 to 1.00)
+        const sharePrice = decimalOdds > 0
+            ? Math.round((1 / decimalOdds) * 100) / 100
+            : 0.50;
+
+        return {
+            decimalOdds: Math.round(decimalOdds * 100) / 100,
+            probability: `${probability}%`,
+            sharePrice: sharePrice,
+            payoutPerTen: this.calculatePotentialPayout(10, poolData, outcome, merchantRake)
+        };
+    }
+
+    /**
      * Calculates the potential payout for a specific wager stake.
+     * Rounds down to 2 decimal places (cents) to ensure platform sanity.
      */
     public static calculatePotentialPayout(
         stake: number,
@@ -33,6 +64,7 @@ export class Totalisator {
         merchantRake?: number
     ): number {
         const odds = this.calculateOdds(poolData, outcome, merchantRake);
-        return stake * odds;
+        const rawPayout = stake * odds;
+        return Math.floor(rawPayout * 100) / 100;
     }
 }

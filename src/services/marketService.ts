@@ -109,6 +109,8 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         const wagers = wagersRes.rows;
 
         // 3. Calculate and update payouts
+        let totalPayoutsCalculated = 0;
+
         for (const wager of wagers) {
             let payout = 0;
             if (wager.selection === outcome) {
@@ -117,12 +119,19 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
                 const rake = merchantRes.rows[0]?.config?.default_rake;
 
                 payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, outcome, rake);
+                totalPayoutsCalculated += payout;
             }
 
             await client.query(
                 'UPDATE wagers SET payout = $1, status = $2, settled_at = NOW() WHERE id = $3',
                 [payout, 'SETTLED', wager.id]
             );
+        }
+
+        // --- Post-Calculation Sanity Check ---
+        const totalPoolCollected = poolData.yes + poolData.no;
+        if (totalPayoutsCalculated > totalPoolCollected + 0.01) { // 0.01 buffer for tiny float diffs
+            throw new Error(`Solvency Alert: Calculated payouts ($${totalPayoutsCalculated}) exceed total pool ($${totalPoolCollected}). Settlement aborted.`);
         }
 
         // 4. Update market status
