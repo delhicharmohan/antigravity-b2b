@@ -97,7 +97,7 @@ describe('placeWager', () => {
             rows: [{
                 id: 'market-123',
                 status: 'OPEN',
-                closure_timestamp: Date.now() + 10000,
+                closure_timestamp: Date.now() + 600000,
                 pool_yes: 1000,
                 pool_no: 1000,
                 total_pool: 2000
@@ -156,7 +156,7 @@ describe('placeWager', () => {
             rows: [{
                 id: 'market-123',
                 status: 'OPEN',
-                closure_timestamp: Date.now() + 10000
+                closure_timestamp: Date.now() + 600000
             }]
         });
         // 4. Balance (Fail - 0 rows updated)
