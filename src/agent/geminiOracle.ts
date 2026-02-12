@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { query } from "../config/db";
 import { settleMarket } from "../services/marketService";
 import { LoggerService } from "../services/loggerService";
+import { extractJson } from "../utils/jsonUtils";
 
 export class GeminiOracle {
     private genAI: GoogleGenerativeAI | null = null;
@@ -75,8 +76,7 @@ export class GeminiOracle {
             const researcherResult = await this.model.generateContent(researcherPrompt);
             let researcherText = researcherResult.response.text();
 
-            researcherText = researcherText.replace(/```json|```/g, '').trim();
-            const researcherResponse = JSON.parse(researcherText);
+            const researcherResponse = extractJson(researcherText);
 
             if (researcherResponse.proposed_outcome === 'NOT_YET_AVAILABLE') {
                 await LoggerService.info(`[Oracle] ⏳ Result not yet available for Market ${marketId}.`, { marketId });
@@ -113,8 +113,7 @@ export class GeminiOracle {
             const judgeResult = await this.model.generateContent(judgePrompt);
             let judgeText = judgeResult.response.text();
 
-            judgeText = judgeText.replace(/```json|```/g, '').trim();
-            const judgeResponse = JSON.parse(judgeText);
+            const judgeResponse = extractJson(judgeText);
 
             if (judgeResponse.verdict === 'agree' && researcherResponse.proposed_outcome === judgeResponse.final_outcome) {
                 await LoggerService.info(`[Oracle] ✅ Consensus reached: ${judgeResponse.final_outcome.toUpperCase()}`, { marketId, reasoning: judgeResponse.reasoning });

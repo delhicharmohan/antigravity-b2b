@@ -13,7 +13,7 @@ export class SchedulerService {
         await LoggerService.info('[Scheduler] ⏰ Initializing Precise Event Scheduler...');
 
         const markets = await query(
-            "SELECT id, closure_timestamp, resolution_timestamp, status FROM markets WHERE status IN ('OPEN', 'CLOSED', 'PENDING', 'RESOLVING')"
+            "SELECT id, closure_timestamp, resolution_timestamp, status FROM markets WHERE status IN ('OPEN', 'CLOSED', 'PENDING', 'RESOLVING', 'DISPUTED')"
         );
 
         for (const market of markets.rows) {
@@ -61,7 +61,7 @@ export class SchedulerService {
                     const { geminiOracle } = await import('../agent/geminiOracle');
                     await geminiOracle.resolveMarket(marketId);
                 });
-            } else if (market.status === 'RESOLVING' || market.status === 'CLOSED') {
+            } else if (market.status === 'RESOLVING' || market.status === 'CLOSED' || market.status === 'DISPUTED') {
                 // If the time already passed or it's stuck in RESOLVING, trigger now
                 await LoggerService.warn(`[Scheduler] 🔄 Recovering stale/passed resolution for Market ${marketId}`, { marketId, status: market.status });
                 (async () => {

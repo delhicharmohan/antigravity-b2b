@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createMarketService } from "../services/marketService";
+import { extractJson } from "../utils/jsonUtils";
 
 // Mock response for fallback
 const MOCK_MARKETS = [
@@ -166,8 +167,7 @@ export class GeminiScout {
             console.log("[Scout] AI Response received.");
 
             // Clean up potentially wrapped JSON in markdown blocks
-            const cleanText = text.replace(/```json|```/g, '').trim();
-            const markets = JSON.parse(cleanText);
+            const markets = extractJson(text);
             console.log(`[Scout] Generated ${markets.length} short-term markets.`);
             return markets;
         } catch (error) {
@@ -214,8 +214,7 @@ export class GeminiScout {
             console.log("[Scout] Fetching real-time trends using Google Search grounding...");
             const result = await this.model.generateContent(prompt);
             const text = result.response.text();
-            const cleanText = text.replace(/```json|```/g, '').trim();
-            return JSON.parse(cleanText);
+            return extractJson(text);
         } catch (error) {
             console.error("[Scout] Trends fetch failed:", error);
             return { x: [], google: [], news: [], ai_recommendations: [] };
