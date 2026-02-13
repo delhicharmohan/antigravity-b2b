@@ -108,6 +108,19 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
         const wagers = wagersRes.rows;
 
+        // Fetch all merchant configs in one go to avoid N+1
+        const merchantIds = [...new Set(wagers.map(w => w.merchant_id))];
+        const merchantMap = new Map<string, any>();
+        if (merchantIds.length > 0) {
+            const merchantsRes = await client.query(
+                'SELECT id, raw_api_key, config FROM merchants WHERE id = ANY($1)',
+                [merchantIds]
+            );
+            for (const m of merchantsRes.rows) {
+                merchantMap.set(m.id, m);
+            }
+        }
+
         // 3. Calculate and update payouts
         let totalPayoutsCalculated = 0;
 
@@ -115,8 +128,8 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
             let payout = 0;
             if (wager.selection === outcome) {
                 // Fetch merchant rake
-                const merchantRes = await client.query('SELECT config FROM merchants WHERE id = $1', [wager.merchant_id]);
-                const rake = merchantRes.rows[0]?.config?.default_rake;
+                const merchant = merchantMap.get(wager.merchant_id);
+                const rake = merchant?.config?.default_rake;
 
                 payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, outcome, rake);
                 totalPayoutsCalculated += payout;
@@ -161,7 +174,7 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
         for (const merchantId of uniqueMerchants) {
             const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
-            WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
+            WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers, merchantMap.get(merchantId));
         }
 
         return { success: true, wagerCount: wagers.length };

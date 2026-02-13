@@ -12,13 +12,19 @@ export class WebhookService {
         marketId: string,
         marketStatus: string,
         outcome: string,
-        wagers: any[] = []
+        wagers: any[] = [],
+        merchantData?: any
     ) {
         try {
-            const result = await query('SELECT raw_api_key, config FROM merchants WHERE id = $1', [merchantId]);
-            if (result.rowCount === 0) return;
+            let merchant;
+            if (merchantData) {
+                merchant = merchantData;
+            } else {
+                const result = await query('SELECT raw_api_key, config FROM merchants WHERE id = $1', [merchantId]);
+                if (result.rowCount === 0) return;
+                merchant = result.rows[0];
+            }
 
-            const merchant = result.rows[0];
             const webhookUrl = merchant.config?.webhook_url;
 
             if (!webhookUrl) return;
