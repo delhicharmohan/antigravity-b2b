@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
+import { ADMIN_SECRET } from '../config/env';
 
 // Extend Express Request to include merchant data
 declare global {
@@ -88,7 +89,6 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
 
 export const authenticateAdmin = async (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.header('Authorization');
-    const adminSecret = process.env.ADMIN_SECRET || 'antigravity_admin_2024';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Missing or invalid Authorization header' });
@@ -96,7 +96,7 @@ export const authenticateAdmin = async (req: Request, res: Response, next: NextF
 
     const token = authHeader.split(' ')[1];
 
-    if (token !== adminSecret) {
+    if (token !== ADMIN_SECRET) {
         return res.status(403).json({ error: 'Unauthorized admin access' });
     }
 
