@@ -7,6 +7,7 @@ declare global {
     namespace Express {
         interface Request {
             merchant?: any;
+            rawBody?: Buffer;
         }
     }
 }
@@ -65,9 +66,9 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
                 return res.status(401).json({ error: 'Missing X-Merchant-Signature for state-changing request' });
             }
 
-            // In production, use req.rawBody if possible for absolute consistency.
-            // Here we use stringified JSON which expects consistent formatting from client.
-            const bodyStr = JSON.stringify(req.body);
+            // Use req.rawBody if available for absolute consistency (preserves formatting/spacing).
+            // Fallback to stringified JSON if rawBody is not set (e.g. not populated by middleware or non-standard content-type).
+            const bodyStr = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
             const expectedSignature = crypto
                 .createHmac('sha256', merchant.raw_api_key)
                 .update(bodyStr)
