@@ -153,15 +153,20 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
 
         emitMarketStatusUpdate(marketId, 'SETTLED');
 
-        // 5. Trigger Webhook Notifications for involved merchants
-        const { WebhookService } = await import('./webhookService');
-        const finalWagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
-        const finalWagers = finalWagersRes.rows;
+        // 5. Trigger Webhook Notifications for involved merchants (outside transaction)
+        try {
+            const { WebhookService } = await import('./webhookService');
+            const finalWagersRes = await query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
+            const finalWagers = finalWagersRes.rows;
 
-        const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
-        for (const merchantId of uniqueMerchants) {
-            const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
-            WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
+            const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
+            for (const merchantId of uniqueMerchants) {
+                const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
+                await WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
+            }
+        } catch (webhookError: any) {
+            console.error(`[Settlement] Webhook delivery failed for market ${marketId}:`, webhookError.message);
+            // Don't throw — settlement was already committed successfully
         }
 
         return { success: true, wagerCount: wagers.length };

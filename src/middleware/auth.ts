@@ -11,6 +11,25 @@ declare global {
     }
 }
 
+/**
+ * Check if an IPv4 address is within a CIDR range (e.g. 74.220.48.0/24).
+ */
+function isIpInCidr(ip: string, cidr: string): boolean {
+    try {
+        const [range, bits] = cidr.split('/');
+        const mask = ~(2 ** (32 - parseInt(bits)) - 1) >>> 0;
+        const ipNum = ipToInt(ip);
+        const rangeNum = ipToInt(range);
+        return (ipNum & mask) === (rangeNum & mask);
+    } catch {
+        return false;
+    }
+}
+
+function ipToInt(ip: string): number {
+    return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+}
+
 export const authenticateMerchant = async (req: Request, res: Response, next: NextFunction) => {
     const apiKey = req.header('X-Merchant-API-Key')?.trim();
     const signature = req.header('X-Merchant-Signature');
@@ -43,13 +62,23 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
 
         const merchant = result.rows[0];
 
-        // 2. IP Whitelisting (Security Upgrade)
+        // 2. IP Whitelisting with CIDR Subnet Support
         const allowedIps = merchant.config?.allowed_ips;
         if (allowedIps && Array.isArray(allowedIps) && allowedIps.length > 0) {
-            const clientIp = req.ip || req.socket.remoteAddress;
-            // Basic inclusion check for this demo. 
-            // In production, use range/CIDR matching (e.g. proxy-addr or ip-range-check)
-            if (!allowedIps.includes(clientIp)) {
+            let clientIp = req.ip || req.socket.remoteAddress || '';
+            // Strip IPv6-mapped prefix (e.g. ::ffff:1.2.3.4 -> 1.2.3.4)
+            if (clientIp.startsWith('::ffff:')) {
+                clientIp = clientIp.slice(7);
+            }
+
+            const isAllowed = allowedIps.some((entry: string) => {
+                if (entry.includes('/')) {
+                    return isIpInCidr(clientIp, entry);
+                }
+                return clientIp === entry;
+            });
+
+            if (!isAllowed) {
                 console.warn(`[Blocked] Unauthorized IP ${clientIp} for Merchant ${merchant.id}`);
                 return res.status(403).json({
                     error: 'IP Address not whitelisted',
