@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
 import { createMarketService, settleMarket } from '../services/marketService';
+import { ADMIN_SECRET } from '../config/env';
 
 export const createMerchant = async (req: Request, res: Response) => {
     const { name, default_rake } = req.body;
@@ -309,12 +310,11 @@ export const resolveMarketController = async (req: Request, res: Response) => {
 };
 export const adminLogin = async (req: Request, res: Response) => {
     const { password } = req.body;
-    const adminSecret = process.env.ADMIN_SECRET || 'antigravity_admin_2024';
 
-    if (password === adminSecret) {
+    if (password === ADMIN_SECRET) {
         // In a real app, you'd use JWT. For this demo, the secret itself acts as the bearer token.
         // We'll return it so the frontend can store it.
-        res.json({ success: true, token: adminSecret });
+        res.json({ success: true, token: ADMIN_SECRET });
     } else {
         res.status(401).json({ error: 'Invalid admin credentials' });
     }

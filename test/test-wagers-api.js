@@ -1,9 +1,10 @@
 
+require('dotenv').config();
 const axios = require('axios');
 
 async function testApi() {
     const ADMIN_URL = 'http://localhost:3000/admin';
-    const token = 'antigravity_admin_2024';
+    const token = process.env.ADMIN_SECRET || 'antigravity_admin_2024';
 
     try {
         const res = await axios.get(`${ADMIN_URL}/wagers`, {
