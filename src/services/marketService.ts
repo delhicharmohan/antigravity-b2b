@@ -82,7 +82,7 @@ export const createMarketService = async (
     return newMarket;
 };
 
-export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
+export const settleMarket = async (marketId: string, outcome: string) => {
     const client = await getClient();
 
     try {
@@ -99,10 +99,15 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
             return { success: true, message: 'Market already settled' } as any;
         }
 
-        const poolData = {
-            yes: Number(market.pool_yes),
-            no: Number(market.pool_no)
-        };
+        let poolData: Record<string, number> = {};
+        if (market.pools && Object.keys(market.pools).length > 0) {
+            poolData = market.pools;
+        } else {
+            poolData = {
+                yes: Number(market.pool_yes || 0),
+                no: Number(market.pool_no || 0)
+            };
+        }
 
         // 2. Fetch all wagers for this market
         const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
@@ -129,7 +134,7 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         }
 
         // --- Post-Calculation Sanity Check ---
-        const totalPoolCollected = poolData.yes + poolData.no;
+        const totalPoolCollected = Object.values(poolData).reduce((sum, val) => sum + val, 0);
         if (totalPayoutsCalculated > totalPoolCollected + 0.01) { // 0.01 buffer for tiny float diffs
             throw new Error(`Solvency Alert: Calculated payouts ($${totalPayoutsCalculated}) exceed total pool ($${totalPoolCollected}). Settlement aborted.`);
         }
@@ -147,8 +152,7 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
             marketId,
             outcome,
             wagerCount: wagers.length,
-            poolYes: poolData.yes,
-            poolNo: poolData.no
+            poolData
         });
 
         emitMarketStatusUpdate(marketId, 'SETTLED');
@@ -235,6 +239,44 @@ export const voidMarket = async (marketId: string) => {
             marketId,
             error: e.message
         });
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+export const closeMarket = async (marketId: string) => {
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Lock and get status
+        const marketRes = await client.query('SELECT status FROM markets WHERE id = $1 FOR UPDATE', [marketId]);
+        if (marketRes.rows.length === 0) throw new Error('Market not found');
+
+        const currentStatus = marketRes.rows[0].status;
+
+        // Idempotency check
+        if (currentStatus === 'CLOSED' || currentStatus === 'SETTLED' || currentStatus === 'VOIDED' || currentStatus === 'RESOLVING') {
+            await client.query('ROLLBACK');
+            return true; // Consider it done
+        }
+
+        // 2. Update status
+        await client.query("UPDATE markets SET status = 'CLOSED' WHERE id = $1", [marketId]);
+
+        await client.query('COMMIT');
+
+        const { LoggerService } = await import('./loggerService');
+        await LoggerService.info(`[Close] 🔒 Market ${marketId} closed manually/via watchdog.`, { marketId });
+
+        emitMarketStatusUpdate(marketId, 'CLOSED');
+
+        return true;
+    } catch (e: any) {
+        await client.query('ROLLBACK');
+        const { LoggerService } = await import('./loggerService');
+        await LoggerService.error(`[Close] ❌ Close failed for Market ${marketId}: ${e.message}`, { marketId, error: e.message });
         throw e;
     } finally {
         client.release();

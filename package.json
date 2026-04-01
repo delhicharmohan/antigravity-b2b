@@ -7,6 +7,8 @@
     "dev": "nodemon --exec ts-node src/app.ts",
     "build": "tsc && cd frontend && npm install && npm run build",
     "db:init": "node dist/setup-db.js",
+    "ipl:activate": "bash scripts/ipl-activate.sh",
+    "ipl:daily": "bash scripts/ipl-daily.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -32,15 +32,20 @@ app.use(express.json());
 // Initialize Services
 import { initSocket } from './services/socketService';
 import { SchedulerService } from './services/schedulerService';
+import { MarketWatchdog } from './services/marketWatchdog';
 initSocket(io);
 SchedulerService.init();
+MarketWatchdog.start();
 
 // Routes
 import v1Routes from './routes/v1';
 import adminRoutes from './routes/admin';
+import { iplMerchantRoutes, iplAdminRoutes } from './cricket/cricketRoutes';
 
 app.use('/admin', adminRoutes);
+app.use('/admin/ipl', iplAdminRoutes);
 app.use('/v1', v1Routes);
+app.use('/v1/ipl', iplMerchantRoutes);
 
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -61,8 +66,16 @@ app.get(/.*/, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
+
+    // Initialize Cricket Module (after server is listening)
+    try {
+        const { initCricketModule } = await import('./cricket/init');
+        await initCricketModule();
+    } catch (error: any) {
+        console.error('[CricketModule] Init failed (non-fatal):', error?.message);
+    }
 });
 
 export { httpServer, io };

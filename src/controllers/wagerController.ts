@@ -12,9 +12,7 @@ export const placeWager = async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Invalid wager parameters' });
     }
 
-    if (!['yes', 'no'].includes(selection.toLowerCase())) {
-        return res.status(400).json({ error: 'Invalid selection. Must be "yes" or "no".' });
-    }
+    const normalizedSelection = selection.toLowerCase();
 
     const client = await getClient();
 
@@ -80,9 +78,10 @@ export const placeWager = async (req: Request, res: Response) => {
         // --- Security Hardenings ---
 
         // 1. Cooling-off Period (Anti-Sniping)
-        // Block betting 5 minutes before the technical closure timestamp
+        // Block betting 5 minutes before the technical closure timestamp for PRE-MATCH markets
+        // IPL Micro markets are managed strictly by LiveContestEngine and don't need this buffer.
         const COOLING_OFF_MS = 5 * 60 * 1000;
-        if (Date.now() > (Number(marketData.closure_timestamp) - COOLING_OFF_MS)) {
+        if (marketData.category !== 'IPL Micro' && Date.now() > (Number(marketData.closure_timestamp) - COOLING_OFF_MS)) {
             throw new Error('Market is in cooling-off period. New wagers are no longer accepted.');
         }
 
@@ -99,7 +98,7 @@ export const placeWager = async (req: Request, res: Response) => {
         const wagerRes = await client.query(
             `INSERT INTO wagers (merchant_id, market_id, selection, stake, external_user_id, idempotency_key)
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-            [merchant.id, marketId, selection.toLowerCase(), stake, userId, idempotencyKey]
+            [merchant.id, marketId, normalizedSelection, stake, userId, idempotencyKey]
         );
         const wagerId = wagerRes.rows[0].id;
 
@@ -111,36 +110,67 @@ export const placeWager = async (req: Request, res: Response) => {
         );
 
         // Update Market Pool
-        const poolCol = selection.toLowerCase() === 'yes' ? 'pool_yes' : 'pool_no';
-
-        const updateRes = await client.query(
-            `UPDATE markets 
-             SET ${poolCol} = ${poolCol} + $1,
-                 volume_24h = volume_24h + $1
-             WHERE id = $2
-             RETURNING pool_yes, pool_no, total_pool`,
-            [stake, marketId]
-        );
+        let updateRes;
+        
+        if (['yes', 'no'].includes(normalizedSelection)) {
+            const poolCol = normalizedSelection === 'yes' ? 'pool_yes' : 'pool_no';
+            updateRes = await client.query(
+                `UPDATE markets 
+                 SET ${poolCol} = COALESCE(${poolCol}, 0) + $1,
+                     total_pool = COALESCE(total_pool, 0) + $1,
+                     volume_24h = COALESCE(volume_24h, 0) + $1
+                 WHERE id = $2
+                 RETURNING pool_yes, pool_no, total_pool`,
+                [stake, marketId]
+            );
+        } else {
+            // N-way pool (Micro-contests)
+            updateRes = await client.query(
+                `UPDATE markets 
+                 SET pools = jsonb_set(
+                     COALESCE(pools, '{}'::jsonb), 
+                     array[$1::text], 
+                     to_jsonb(COALESCE((pools->>$1::text)::numeric, 0) + $2::numeric)
+                 ),
+                 total_pool = COALESCE(total_pool, 0) + $2,
+                 volume_24h = COALESCE(volume_24h, 0) + $2
+                 WHERE id = $3
+                 RETURNING pools, total_pool`,
+                [normalizedSelection, stake, marketId]
+            );
+        }
 
         await client.query('COMMIT');
 
         // --- Post-Transaction Logic ---
-
-        const newPool = {
-            yes: Number(updateRes.rows[0].pool_yes),
-            no: Number(updateRes.rows[0].pool_no)
-        };
-        const totalPool = Number(updateRes.rows[0].total_pool);
-
+        const totalPool = Number(updateRes.rows[0].total_pool || 0);
+        let newPool: Record<string, number> = {};
+        let metrics: Record<string, any> = {};
         const merchantRake = merchant.config?.default_rake;
-        const yesMetrics = Totalisator.getMarketMetrics(newPool, 'yes', merchantRake);
-        const noMetrics = Totalisator.getMarketMetrics(newPool, 'no', merchantRake);
+
+        if (['yes', 'no'].includes(normalizedSelection)) {
+            newPool = {
+                yes: Number(updateRes.rows[0].pool_yes || 0),
+                no: Number(updateRes.rows[0].pool_no || 0)
+            };
+            metrics = {
+                yes: Totalisator.getMarketMetrics(newPool, 'yes', merchantRake),
+                no: Totalisator.getMarketMetrics(newPool, 'no', merchantRake)
+            };
+        } else {
+            newPool = updateRes.rows[0].pools || {};
+            // For N-way, we might not want to emit metrics for ALL possible outcomes if there are many,
+            // but for micro-contests (6 outcomes), it's fine.
+            for (const key of Object.keys(newPool)) {
+                metrics[key] = Totalisator.getMarketMetrics(newPool, key, merchantRake);
+            }
+        }
 
         emitOddsUpdate(marketId, {
             marketId,
             pool_data: newPool,
             total_pool: totalPool,
-            metrics: { yes: yesMetrics, no: noMetrics }
+            metrics
         });
 
         res.status(201).json({
@@ -148,8 +178,8 @@ export const placeWager = async (req: Request, res: Response) => {
             wagerId: wagerId,
             marketId,
             stake,
-            selection,
-            metrics: { yes: yesMetrics, no: noMetrics }
+            selection: normalizedSelection,
+            metrics
         });
 
     } catch (error: any) {

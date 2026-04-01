@@ -24,6 +24,47 @@ export class GeminiOracle {
     }
 
     /**
+     * Determines the actual start time of an event from its title.
+     * Returns timestamp (ms) or null if not found/uncertain.
+     */
+    public async getEventStartTime(title: string): Promise<number | null> {
+        if (!this.model) return null;
+
+        try {
+            const prompt = `
+            Your task is to find the ACTUAL scheduled start time for the event described in this market title: "${title}".
+            
+            RULES:
+            1. Use Google Search to find the official start time.
+            2. Be precise with Time Zones. Convert everything to UTC.
+            3. If the event has multiple parts (e.g. "1st T20"), find the start time of that specific part.
+            
+            Return ONLY a JSON object:
+            {
+                "startTimeIso": "ISO 8601 Date String (e.g. 2026-02-15T14:30:00Z)",
+                "confidence": 0.0 to 1.0 (1.0 = certain from official source),
+                "source": "Name of source verified"
+            }
+            `;
+
+            const result = await this.model.generateContent(prompt);
+            const responseText = result.response.text();
+            const data = extractJson(responseText);
+
+            if (data?.startTimeIso && data.confidence > 0.8) {
+                const timestamp = new Date(data.startTimeIso).getTime();
+                if (!isNaN(timestamp)) {
+                    await LoggerService.info(`[Oracle] 🕒 Found start time for "${title}": ${data.startTimeIso}`, { title, timestamp });
+                    return timestamp;
+                }
+            }
+        } catch (error: any) {
+            console.warn(`[Oracle] Failed to get start time for "${title}":`, error.message);
+        }
+        return null;
+    }
+
+    /**
      * Resolves a market using the Red-Team Consensus model.
      * 1. Researcher: Fetches evidence.
      * 2. Judge: Verifies evidence.

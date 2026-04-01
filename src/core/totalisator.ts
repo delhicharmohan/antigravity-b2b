@@ -6,14 +6,14 @@ export class Totalisator {
      * Formula: Odds = (Total Pool * (1 - Rake)) / Pool[Outcome]
      */
     public static calculateOdds(
-        poolData: { yes: number; no: number },
-        outcome: 'yes' | 'no',
+        poolData: Record<string, number>,
+        outcome: string,
         merchantRake?: number
     ): number {
-        const totalPool = poolData.yes + poolData.no;
+        const totalPool = Object.values(poolData).reduce((sum, val) => sum + val, 0);
 
         // Avoid division by zero
-        if (totalPool === 0 || poolData[outcome] === 0) {
+        if (totalPool === 0 || !poolData[outcome] || poolData[outcome] === 0) {
             return 1.0; // Or some initial starting odds logic
         }
 
@@ -28,22 +28,23 @@ export class Totalisator {
      * Useful for premium merchant frontends.
      */
     public static getMarketMetrics(
-        poolData: { yes: number; no: number },
-        outcome: 'yes' | 'no',
+        poolData: Record<string, number>,
+        outcome: string,
         merchantRake?: number
     ) {
         const decimalOdds = this.calculateOdds(poolData, outcome, merchantRake);
-        const totalPool = poolData.yes + poolData.no;
+        const totalPool = Object.values(poolData).reduce((sum, val) => sum + val, 0);
 
         // Implied Probability (based on pool weight)
+        const outcomePool = poolData[outcome] || 0;
         const probability = totalPool > 0
-            ? Math.round((poolData[outcome] / totalPool) * 100)
-            : 50;
+            ? Math.round((outcomePool / totalPool) * 100)
+            : Math.round(100 / Math.max(Object.keys(poolData).length, 1)); // distribute evenly if empty
 
         // Share Price (Price for $1.00 payout, 0.00 to 1.00)
         const sharePrice = decimalOdds > 0
             ? Math.round((1 / decimalOdds) * 100) / 100
-            : 0.50;
+            : (1 / Math.max(Object.keys(poolData).length, 1));
 
         return {
             decimalOdds: Math.round(decimalOdds * 100) / 100,
@@ -59,8 +60,8 @@ export class Totalisator {
      */
     public static calculatePotentialPayout(
         stake: number,
-        poolData: { yes: number; no: number },
-        outcome: 'yes' | 'no',
+        poolData: Record<string, number>,
+        outcome: string,
         merchantRake?: number
     ): number {
         const odds = this.calculateOdds(poolData, outcome, merchantRake);
