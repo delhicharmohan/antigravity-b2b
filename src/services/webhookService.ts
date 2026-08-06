@@ -1,6 +1,7 @@
 import axios from 'axios';
-import crypto from 'crypto';
+import { createHmac } from 'node:crypto';
 import { query } from '../config/db';
+import { LoggerService } from './loggerService';
 
 export class WebhookService {
     /**
@@ -38,12 +39,15 @@ export class WebhookService {
             };
 
             const bodyStr = JSON.stringify(payload);
-            const signature = crypto
-                .createHmac('sha256', merchant.raw_api_key)
+            const signature = createHmac('sha256', merchant.raw_api_key)
                 .update(bodyStr)
                 .digest('hex');
 
-            console.log(`[Webhook] Delivering settlement to ${webhookUrl} for merchant ${merchantId}...`);
+            await LoggerService.info(`[Webhook] Delivering settlement to ${webhookUrl} for merchant ${merchantId}...`, {
+                merchantId,
+                marketId,
+                webhookUrl
+            });
 
             let responseStatus: number | null = null;
             let responseBody: string | null = null;
@@ -61,12 +65,21 @@ export class WebhookService {
                 });
                 responseStatus = response.status;
                 responseBody = JSON.stringify(response.data).slice(0, 1000);
-                console.log(`[Webhook] Delivered successfully to ${merchantId}`);
+                await LoggerService.info(`[Webhook] Delivered successfully to ${merchantId}`, {
+                    merchantId,
+                    marketId,
+                    responseStatus
+                });
             } catch (axiosError: any) {
                 responseStatus = axiosError.response?.status || null;
                 responseBody = axiosError.response ? JSON.stringify(axiosError.response.data).slice(0, 1000) : null;
                 errorMessage = axiosError.message;
-                console.error(`[Webhook Error] Failed to delivery to merchant ${merchantId}:`, axiosError.message);
+                await LoggerService.error(`[Webhook Error] Failed to deliver to merchant ${merchantId}: ${axiosError.message}`, {
+                    merchantId,
+                    marketId,
+                    error: axiosError.message,
+                    stack: axiosError.stack
+                });
                 throw axiosError; // Re-throw to be caught by outer block for global logging if needed
             } finally {
                 // Persistent Audit Log
