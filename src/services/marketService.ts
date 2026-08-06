@@ -199,17 +199,12 @@ export const voidMarket = async (marketId: string) => {
             throw new Error(`Market already ${market.status.toLowerCase()}`);
         }
 
-        // 2. Fetch all wagers for this market
-        const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
-        const wagers = wagersRes.rows;
-
-        // 3. Refund all wagers
-        for (const wager of wagers) {
-            await client.query(
-                'UPDATE wagers SET payout = $1, status = $2, settled_at = NOW() WHERE id = $3',
-                [Number(wager.stake), 'VOIDED', wager.id]
-            );
-        }
+        // 2. Refund all wagers in bulk
+        const refundRes = await client.query(
+            'UPDATE wagers SET payout = stake, status = $1, settled_at = NOW() WHERE market_id = $2',
+            ['VOIDED', marketId]
+        );
+        const wagerCount = refundRes.rowCount || 0;
 
         // 4. Update market status
         await client.query(
@@ -220,14 +215,14 @@ export const voidMarket = async (marketId: string) => {
         await client.query('COMMIT');
 
         const { LoggerService } = await import('./loggerService');
-        await LoggerService.warn(`[Void] ⚠️ Market ${marketId} voided and ${wagers.length} wagers refunded`, {
+        await LoggerService.warn(`[Void] ⚠️ Market ${marketId} voided and ${wagerCount} wagers refunded`, {
             marketId,
-            wagerCount: wagers.length
+            wagerCount
         });
 
         emitMarketStatusUpdate(marketId, 'VOIDED');
 
-        return { success: true, wagerCount: wagers.length };
+        return { success: true, wagerCount };
     } catch (e: any) {
         await client.query('ROLLBACK');
         const { LoggerService } = await import('./loggerService');
