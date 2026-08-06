@@ -2,15 +2,35 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const poolConfig = process.env.DATABASE_URL
-    ? { connectionString: process.env.DATABASE_URL }
-    : {
-        user: process.env.POSTGRES_USER || 'antigravity',
-        host: process.env.POSTGRES_HOST || 'localhost',
-        database: process.env.POSTGRES_DB || 'antigravity_b2b',
-        password: process.env.POSTGRES_PASSWORD || 'password123',
-        port: Number(process.env.POSTGRES_PORT) || 5433,
+const getPoolConfig = () => {
+    if (process.env.DATABASE_URL) {
+        return { connectionString: process.env.DATABASE_URL };
+    }
+
+    const {
+        POSTGRES_USER,
+        POSTGRES_HOST,
+        POSTGRES_DB,
+        POSTGRES_PASSWORD,
+        POSTGRES_PORT
+    } = process.env;
+
+    if (!POSTGRES_USER || !POSTGRES_HOST || !POSTGRES_DB || !POSTGRES_PASSWORD) {
+        throw new Error(
+            'Database configuration error: DATABASE_URL or (POSTGRES_USER, POSTGRES_HOST, POSTGRES_DB, POSTGRES_PASSWORD) must be provided.'
+        );
+    }
+
+    return {
+        user: POSTGRES_USER,
+        host: POSTGRES_HOST,
+        database: POSTGRES_DB,
+        password: POSTGRES_PASSWORD,
+        port: Number(POSTGRES_PORT) || 5433,
     };
+};
+
+const poolConfig = getPoolConfig();
 
 const pool = new Pool(poolConfig);
 
