@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
+import { LoggerService } from '../services/loggerService';
 
 // Extend Express Request to include merchant data
 declare global {
@@ -117,7 +118,12 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
 
 export const authenticateAdmin = async (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.header('Authorization');
-    const adminSecret = process.env.ADMIN_SECRET || 'antigravity_admin_2024';
+    const adminSecret = process.env.ADMIN_SECRET;
+
+    if (!adminSecret) {
+        await LoggerService.error('ADMIN_SECRET environment variable is not set');
+        return res.status(500).json({ error: 'Admin access is not configured' });
+    }
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Missing or invalid Authorization header' });
@@ -125,9 +131,14 @@ export const authenticateAdmin = async (req: Request, res: Response, next: NextF
 
     const token = authHeader.split(' ')[1];
 
-    if (token !== adminSecret) {
+    // Use timing-safe comparison on hashes to prevent timing attacks
+    const tokenHash = crypto.createHash('sha256').update(String(token || '')).digest();
+    const secretHash = crypto.createHash('sha256').update(adminSecret).digest();
+
+    if (tokenHash.length === secretHash.length && crypto.timingSafeEqual(tokenHash, secretHash)) {
+        next();
+    } else {
+        await LoggerService.warn('Unauthorized admin access attempt', { ip: req.ip });
         return res.status(403).json({ error: 'Unauthorized admin access' });
     }
-
-    next();
 };
