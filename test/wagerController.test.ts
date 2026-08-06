@@ -1,32 +1,55 @@
+import { expect, test, describe, beforeEach, mock } from "bun:test";
 import { placeWager } from '../src/controllers/wagerController';
 import { Request, Response } from 'express';
 
+// Mock pg
+mock.module("pg", () => {
+  return {
+    Pool: class {
+      on() { return this; }
+      query() {}
+      connect() {}
+    },
+  };
+});
+
+// Mock dotenv
+mock.module("dotenv", () => {
+  return {
+    config: () => ({}),
+    default: {
+        config: () => ({})
+    }
+  };
+});
+
 // Mock getClient
-const mockQuery = jest.fn();
-const mockRelease = jest.fn();
+const mockQuery = mock();
+const mockRelease = mock();
 const mockClient = {
     query: mockQuery,
     release: mockRelease
 };
 
-jest.mock('../src/config/db', () => ({
-    getClient: jest.fn(() => Promise.resolve(mockClient))
+mock.module('../src/config/db', () => ({
+    getClient: mock(() => Promise.resolve(mockClient)),
+    query: mock()
 }));
 
 // Mock socketService
-jest.mock('../src/services/socketService', () => ({
-    emitOddsUpdate: jest.fn()
+mock.module('../src/services/socketService', () => ({
+    emitOddsUpdate: mock()
 }));
 
 describe('placeWager', () => {
     let req: Partial<Request>;
     let res: Partial<Response>;
-    let json: jest.Mock;
-    let status: jest.Mock;
+    let json: any;
+    let status: any;
 
     beforeEach(() => {
-        json = jest.fn();
-        status = jest.fn(() => ({ json }));
+        json = mock();
+        status = mock(() => ({ json }));
         res = {
             status: status as any,
             json: json as any
@@ -41,21 +64,21 @@ describe('placeWager', () => {
             merchant: {
                 id: 'merchant-1',
                 config: { default_rake: 0.05 }
-            },
-            header: jest.fn()
+            } as any,
+            header: mock() as any
         };
-        mockQuery.mockReset();
-        mockRelease.mockReset();
+        mockQuery.mockClear();
+        mockRelease.mockClear();
     });
 
-    it('should fail if parameters are invalid', async () => {
+    test('should fail if parameters are invalid', async () => {
         req.body.stake = -10;
         await placeWager(req as Request, res as Response);
         expect(status).toHaveBeenCalledWith(400);
     });
 
-    it('should handle idempotency key', async () => {
-        (req.header as jest.Mock).mockReturnValue('key-123');
+    test('should handle idempotency key', async () => {
+        (req.header as any).mockReturnValue('key-123');
 
         // Mock DB: BEGIN
         mockQuery.mockResolvedValueOnce({});
@@ -82,8 +105,8 @@ describe('placeWager', () => {
         }));
     });
 
-    it('should deduct balance and place wager', async () => {
-        (req.header as jest.Mock).mockReturnValue('key-456');
+    test('should deduct balance and place wager', async () => {
+        (req.header as any).mockReturnValue('key-456');
 
         // Sequence of DB calls
         // 1. BEGIN
@@ -97,7 +120,7 @@ describe('placeWager', () => {
             rows: [{
                 id: 'market-123',
                 status: 'OPEN',
-                closure_timestamp: Date.now() + 10000,
+                closure_timestamp: Date.now() + 1000000,
                 pool_yes: 1000,
                 pool_no: 1000,
                 total_pool: 2000
@@ -144,8 +167,8 @@ describe('placeWager', () => {
         );
     });
 
-    it('should fail with 402 if insufficient funds', async () => {
-        (req.header as jest.Mock).mockReturnValue('key-fail');
+    test('should fail with 402 if insufficient funds', async () => {
+        (req.header as any).mockReturnValue('key-fail');
 
         // 1. BEGIN
         mockQuery.mockResolvedValueOnce({});
@@ -156,7 +179,7 @@ describe('placeWager', () => {
             rows: [{
                 id: 'market-123',
                 status: 'OPEN',
-                closure_timestamp: Date.now() + 10000
+                closure_timestamp: Date.now() + 1000000
             }]
         });
         // 4. Balance (Fail - 0 rows updated)
