@@ -160,10 +160,10 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
             const finalWagers = finalWagersRes.rows;
 
             const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
-            for (const merchantId of uniqueMerchants) {
+            await Promise.all(uniqueMerchants.map(merchantId => {
                 const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
-                await WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
-            }
+                return WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
+            }));
         } catch (webhookError: any) {
             console.error(`[Settlement] Webhook delivery failed for market ${marketId}:`, webhookError.message);
             // Don't throw — settlement was already committed successfully
