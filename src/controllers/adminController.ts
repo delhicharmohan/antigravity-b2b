@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
 import { createMarketService, settleMarket } from '../services/marketService';
+import { Totalisator } from '../core/totalisator';
 
 export const createMerchant = async (req: Request, res: Response) => {
     const { name, default_rake } = req.body;
@@ -79,28 +80,10 @@ export const listMarkets = async (req: Request, res: Response) => {
     try {
         const result = await query('SELECT * FROM markets ORDER BY id DESC');
 
-        const { Totalisator } = await import('../core/totalisator');
-
         const markets = result.rows.map(m => {
-            const pool = {
-                yes: parseFloat(m.pool_yes),
-                no: parseFloat(m.pool_no)
-            };
-
             // For admin view, we use a default platform rake or 0 for raw odds
             const rake = 0.05;
-
-            return {
-                ...m,
-                odds: {
-                    yes: Totalisator.calculateOdds(pool, 'yes', rake),
-                    no: Totalisator.calculateOdds(pool, 'no', rake)
-                },
-                probabilities: {
-                    yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
-                    no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
-                }
-            };
+            return Totalisator.enhanceMarketWithMetrics(m, rake);
         });
 
         res.json(markets);
