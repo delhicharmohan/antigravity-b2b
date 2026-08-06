@@ -28,24 +28,7 @@ export const listMarkets = async (req: Request, res: Response) => {
         const result = await query(sql, params);
 
         // Enhance with real-time odds based on merchant's specific rake
-        const markets = result.rows.map(m => {
-            const pool = {
-                yes: parseFloat(m.pool_yes),
-                no: parseFloat(m.pool_no)
-            };
-
-            return {
-                ...m,
-                odds: {
-                    yes: Totalisator.calculateOdds(pool, 'yes', rake),
-                    no: Totalisator.calculateOdds(pool, 'no', rake)
-                },
-                probabilities: {
-                    yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
-                    no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
-                }
-            };
-        });
+        const markets = result.rows.map(m => Totalisator.enhanceMarketWithMetrics(m, rake));
 
         res.json(markets);
     } catch (error: any) {
@@ -71,22 +54,7 @@ export const getMarketDetails = async (req: Request, res: Response) => {
         }
 
         const m = result.rows[0];
-        const pool = {
-            yes: parseFloat(m.pool_yes),
-            no: parseFloat(m.pool_no)
-        };
-
-        const market = {
-            ...m,
-            odds: {
-                yes: Totalisator.calculateOdds(pool, 'yes', rake),
-                no: Totalisator.calculateOdds(pool, 'no', rake)
-            },
-            probabilities: {
-                yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
-                no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
-            }
-        };
+        const market = Totalisator.enhanceMarketWithMetrics(m, rake);
 
         res.json(market);
     } catch (error: any) {

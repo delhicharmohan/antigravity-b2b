@@ -67,4 +67,28 @@ export class Totalisator {
         const rawPayout = stake * odds;
         return Math.floor(rawPayout * 100) / 100;
     }
+
+    /**
+     * Enhances a raw market object with calculated odds and probabilities.
+     */
+    public static enhanceMarketWithMetrics(market: any, rake?: number) {
+        const pool = {
+            yes: parseFloat(market.pool_yes),
+            no: parseFloat(market.pool_no)
+        };
+
+        const totalPool = pool.yes + pool.no;
+
+        return {
+            ...market,
+            odds: {
+                yes: this.calculateOdds(pool, 'yes', rake),
+                no: this.calculateOdds(pool, 'no', rake)
+            },
+            probabilities: {
+                yes: totalPool > 0 ? pool.yes / totalPool : 0.5,
+                no: totalPool > 0 ? pool.no / totalPool : 0.5
+            }
+        };
+    }
 }
