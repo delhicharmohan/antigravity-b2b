@@ -195,21 +195,16 @@ export const voidMarket = async (marketId: string) => {
         if (marketRes.rows.length === 0) throw new Error('Market not found');
         const market = marketRes.rows[0];
 
-        if (market.status === 'SETTLED' || market.status === 'VOID') {
+        if (market.status === 'SETTLED' || market.status === 'VOIDED') {
             throw new Error(`Market already ${market.status.toLowerCase()}`);
         }
 
-        // 2. Fetch all wagers for this market
-        const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
+        // 2. Refund all wagers in one batch
+        const wagersRes = await client.query(
+            'UPDATE wagers SET payout = stake, status = $1, settled_at = NOW() WHERE market_id = $2 RETURNING *',
+            ['VOIDED', marketId]
+        );
         const wagers = wagersRes.rows;
-
-        // 3. Refund all wagers
-        for (const wager of wagers) {
-            await client.query(
-                'UPDATE wagers SET payout = $1, status = $2, settled_at = NOW() WHERE id = $3',
-                [Number(wager.stake), 'VOIDED', wager.id]
-            );
-        }
 
         // 4. Update market status
         await client.query(
