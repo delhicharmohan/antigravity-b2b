@@ -2,6 +2,8 @@ import { query, getClient } from '../config/db';
 import { Totalisator } from '../core/totalisator';
 import { emitMarketStatusUpdate } from './socketService';
 import { SchedulerService } from './schedulerService';
+import { LoggerService } from './loggerService';
+import { WebhookService } from './webhookService';
 
 export const createMarketService = async (
     title: string,
@@ -142,7 +144,6 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
 
         await client.query('COMMIT');
 
-        const { LoggerService } = await import('./loggerService');
         await LoggerService.info(`[Settlement] ✅ Market ${marketId} settled as ${outcome.toUpperCase()}`, {
             marketId,
             outcome,
@@ -155,15 +156,16 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
 
         // 5. Trigger Webhook Notifications for involved merchants (outside transaction)
         try {
-            const { WebhookService } = await import('./webhookService');
             const finalWagersRes = await query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
             const finalWagers = finalWagersRes.rows;
 
             const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
-            for (const merchantId of uniqueMerchants) {
+
+            // Parallelize webhook deliveries
+            await Promise.all(uniqueMerchants.map(async (merchantId) => {
                 const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
                 await WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
-            }
+            }));
         } catch (webhookError: any) {
             console.error(`[Settlement] Webhook delivery failed for market ${marketId}:`, webhookError.message);
             // Don't throw — settlement was already committed successfully
@@ -172,7 +174,6 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         return { success: true, wagerCount: wagers.length };
     } catch (e: any) {
         await client.query('ROLLBACK');
-        const { LoggerService } = await import('./loggerService');
         await LoggerService.error(`[Settlement] ❌ Settlement failed for Market ${marketId}: ${e.message}`, {
             marketId,
             error: e.message,
@@ -219,7 +220,6 @@ export const voidMarket = async (marketId: string) => {
 
         await client.query('COMMIT');
 
-        const { LoggerService } = await import('./loggerService');
         await LoggerService.warn(`[Void] ⚠️ Market ${marketId} voided and ${wagers.length} wagers refunded`, {
             marketId,
             wagerCount: wagers.length
@@ -230,7 +230,6 @@ export const voidMarket = async (marketId: string) => {
         return { success: true, wagerCount: wagers.length };
     } catch (e: any) {
         await client.query('ROLLBACK');
-        const { LoggerService } = await import('./loggerService');
         await LoggerService.error(`[Void] ❌ Void failed for Market ${marketId}: ${e.message}`, {
             marketId,
             error: e.message
