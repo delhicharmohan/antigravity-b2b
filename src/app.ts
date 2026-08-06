@@ -8,6 +8,15 @@ import path from 'path';
 
 dotenv.config();
 
+// Service Imports
+import { initSocket } from './services/socketService';
+import { SchedulerService } from './services/schedulerService';
+import { LoggerService } from './services/loggerService';
+
+// Route Imports
+import v1Routes from './routes/v1';
+import adminRoutes from './routes/admin';
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -30,14 +39,8 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize Services
-import { initSocket } from './services/socketService';
-import { SchedulerService } from './services/schedulerService';
 initSocket(io);
 SchedulerService.init();
-
-// Routes
-import v1Routes from './routes/v1';
-import adminRoutes from './routes/admin';
 
 app.use('/admin', adminRoutes);
 app.use('/v1', v1Routes);
@@ -61,8 +64,8 @@ app.get(/.*/, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+httpServer.listen(PORT, async () => {
+    await LoggerService.info(`Server running on port ${PORT}`);
 });
 
 export { httpServer, io };
