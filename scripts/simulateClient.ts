@@ -1,9 +1,7 @@
 import { io } from "socket.io-client";
 import axios from 'axios';
 
-const SERVER_URL = 'http://localhost:3000'; // Default port for Express app if not specified in .env, assume 3000? 
-// Wait, app.ts uses default port? Let's check app.ts or assume 3000 via httpServer.listen
-// app.ts didn't have listen call! I missed that in the initial setup. I need to fix app.ts to listen.
+const SERVER_URL = 'http://localhost:3000';
 
 const MERCHANT_API_KEY = process.argv[2];
 const MARKET_ID = process.argv[3];
