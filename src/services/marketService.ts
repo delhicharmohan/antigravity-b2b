@@ -109,12 +109,15 @@ export const settleMarket = async (marketId: string, outcome: 'yes' | 'no') => {
         const wagers = wagersRes.rows;
 
         // 3. Calculate and update payouts
+        const merchantIds = [...new Set(wagers.map(w => w.merchant_id))];
+        const merchantsRes = await client.query('SELECT id, config FROM merchants WHERE id = ANY($1::int[])', [merchantIds]);
+        const merchantConfigs = new Map(merchantsRes.rows.map(m => [m.id, m.config]));
+
         for (const wager of wagers) {
             let payout = 0;
             if (wager.selection === outcome) {
-                // Fetch merchant rake
-                const merchantRes = await client.query('SELECT config FROM merchants WHERE id = $1', [wager.merchant_id]);
-                const rake = merchantRes.rows[0]?.config?.default_rake;
+                const config = merchantConfigs.get(wager.merchant_id);
+                const rake = config?.default_rake;
 
                 payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, outcome, rake);
             }
