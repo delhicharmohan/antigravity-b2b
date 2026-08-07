@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
-import { createMarketService, settleMarket } from '../services/marketService';
+import { createMarketService, settleMarket, voidMarket as voidMarketService } from '../services/marketService';
+import { Totalisator } from '../core/totalisator';
+import { GeminiScout } from '../agent/geminiScout';
+import { emitMarketDeleted } from '../services/socketService';
+import { geminiOracle } from '../agent/geminiOracle';
+import { LoggerService } from '../services/loggerService';
 
 export const createMerchant = async (req: Request, res: Response) => {
     const { name, default_rake } = req.body;
@@ -79,8 +84,6 @@ export const listMarkets = async (req: Request, res: Response) => {
     try {
         const result = await query('SELECT * FROM markets ORDER BY id DESC');
 
-        const { Totalisator } = await import('../core/totalisator');
-
         const markets = result.rows.map(m => {
             const pool = {
                 yes: parseFloat(m.pool_yes),
@@ -110,8 +113,6 @@ export const listMarkets = async (req: Request, res: Response) => {
     }
 };
 
-import { GeminiScout } from '../agent/geminiScout';
-
 // Markets
 export const updateMarket = async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -140,8 +141,6 @@ export const updateMarket = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Failed to update market' });
     }
 };
-
-import { emitMarketDeleted } from '../services/socketService';
 
 export const deleteMarket = async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -286,8 +285,6 @@ export const listWagers = async (req: Request, res: Response) => {
 export const voidMarket = async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        // We'll implement voidMarket in marketService
-        const { voidMarket: voidMarketService } = await import('../services/marketService');
         const result = await voidMarketService(id);
         res.json(result);
     } catch (error: any) {
@@ -298,7 +295,6 @@ export const voidMarket = async (req: Request, res: Response) => {
 export const resolveMarketController = async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const { geminiOracle } = await import('../agent/geminiOracle');
         // This is async and might take time, but we trigger it and return success for the trigger
         geminiOracle.resolveMarket(id);
         res.json({ success: true, message: 'AI Oracle resolution triggered' });
@@ -309,13 +305,23 @@ export const resolveMarketController = async (req: Request, res: Response) => {
 };
 export const adminLogin = async (req: Request, res: Response) => {
     const { password } = req.body;
-    const adminSecret = process.env.ADMIN_SECRET || 'antigravity_admin_2024';
+    const adminSecret = process.env.ADMIN_SECRET;
 
-    if (password === adminSecret) {
+    if (!adminSecret) {
+        await LoggerService.error('ADMIN_SECRET environment variable is not set');
+        return res.status(500).json({ error: 'Admin login is not configured' });
+    }
+
+    // Use timing-safe comparison on hashes to prevent timing attacks
+    const inputHash = crypto.createHash('sha256').update(String(password || '')).digest();
+    const secretHash = crypto.createHash('sha256').update(adminSecret).digest();
+
+    if (inputHash.length === secretHash.length && crypto.timingSafeEqual(inputHash, secretHash)) {
         // In a real app, you'd use JWT. For this demo, the secret itself acts as the bearer token.
         // We'll return it so the frontend can store it.
         res.json({ success: true, token: adminSecret });
     } else {
+        await LoggerService.warn('Unauthorized admin login attempt', { password_provided: password ? '***' : 'none' });
         res.status(401).json({ error: 'Invalid admin credentials' });
     }
 };
@@ -326,8 +332,6 @@ export const getStatsController = async (req: Request, res: Response) => {
     const dateStr = filterDate.toISOString().split('T')[0];
 
     try {
-        const { query } = await import('../config/db');
-
         // Current Open Markets
         const openRes = await query(
             "SELECT COUNT(*) as count FROM markets WHERE status = 'OPEN'"
@@ -374,7 +378,6 @@ export const getStatsController = async (req: Request, res: Response) => {
 
 export const listLogs = async (req: Request, res: Response) => {
     try {
-        const { LoggerService } = await import('../services/loggerService');
         const logs = await LoggerService.listLogs();
         res.json(logs);
     } catch (error: any) {
@@ -401,8 +404,6 @@ export const listWebhookLogs = async (req: Request, res: Response) => {
 export const getMarketPayoutSummary = async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const { query } = await import('../config/db');
-
         // 1. Get Market Info
         const marketRes = await query("SELECT * FROM markets WHERE id = $1", [id]);
         if (marketRes.rows.length === 0) return res.status(404).json({ error: 'Market not found' });
