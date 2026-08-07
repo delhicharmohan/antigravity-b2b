@@ -39,7 +39,7 @@ const marketSchema = {
             },
             category: {
                 type: SchemaType.STRING,
-                description: "The market category. Must be one of: Crypto, Finance, NFL, Politics, NBA, Cricket, Football, Election, Other."
+                description: "The market category. Must be one of: Crypto, Finance, NFL, Politics, NBA, Football, Election, Other."
             },
             term: {
                 type: SchemaType.STRING,
@@ -127,9 +127,8 @@ export class GeminiScout {
                 1. Adjust the target to a "Closer Target Price" (e.g., "Will Reliance exceed 3100?") to ensure a balanced YES/NO probability.
                 2. If you MUST create an "impossible" market, set the confidence_score to reflect the extreme low probability (0.70-0.75 range) and explicitly state the current price in the source_of_truth description.
         
-        📊 CRICKET & SPORTS:
+        📊 SPORTS:
         If applicable, generate specific match or player performance markets.
-        - For CRICKET, you MUST use https://cricbuzz.com as the source_of_truth, UNLESS it is for IPL (Indian Premier League), then use https://www.iplt20.com/.
         - For FOOTBALL (Soccer), you MUST use https://onefootball.com as the source_of_truth.
         - For NFL (American Football), you MUST use https://www.nfl.com/schedules as the source_of_truth.
         - For NBA (Basketball), you MUST use https://www.nba.com/schedule as the source_of_truth.
@@ -139,7 +138,7 @@ export class GeminiScout {
         2. Use ACTUAL match times and dates.
         3. Confidence: 0.80-0.95 (High confidence in the DATA and EVENT occurrence).
         4. source_of_truth: You MUST provide the DIRECT URL to the data source (e.g., Yahoo Finance, CoinMarketCap, Cricbuzz).
-        5. CATEGORIES: Categorize each market as: Crypto, Finance, NFL, Politics, NBA, Cricket, Football, or Election.
+        5. CATEGORIES: Categorize each market as: Crypto, Finance, NFL, Politics, NBA, Football, or Election.
         6. TERM: You MUST label each market's term correctly.
         
         Generate ${count} markets based on the intent if provided, otherwise diverse across categories and terms.
@@ -180,7 +179,7 @@ export class GeminiScout {
         if (!this.model) {
             return {
                 x: ["#Bitcoin", "#FedRate", "#ChampionsLeague"],
-                google: ["Stock Market Today", "IPL Schedule", "US Election"],
+                google: ["Stock Market Today", "US Election", "Tech Earnings"],
                 news: ["AI Regulations", "Global Inflation", "Tech Earnings"],
                 ai_recommendations: [
                     { keyword: "NVIDIA Earnings", context: "Anticipation for quarterly results driving tech sector volatility." },

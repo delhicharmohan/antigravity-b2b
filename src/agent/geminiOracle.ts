@@ -37,7 +37,7 @@ export class GeminiOracle {
             RULES:
             1. Use Google Search to find the official start time.
             2. Be precise with Time Zones. Convert everything to UTC.
-            3. If the event has multiple parts (e.g. "1st T20"), find the start time of that specific part.
+            3. If the event has multiple parts (e.g. "Game 1"), find the start time of that specific part.
             
             Return ONLY a JSON object:
             {

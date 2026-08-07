@@ -18,25 +18,6 @@ export const initSocket = (socketIo: Server) => {
             socket.leave(`market_${marketId}`);
         });
 
-        // ===== IPL Room Subscriptions =====
-        socket.on('join_ipl_match', (data: { matchKey: string }) => {
-            socket.join(`ipl:match:${data.matchKey}`);
-            socket.join(`ipl:match:${data.matchKey}:contests`);
-            socket.join(`ipl:match:${data.matchKey}:micro`);
-            console.log(`Socket ${socket.id} joined IPL match ${data.matchKey}`);
-        });
-
-        socket.on('leave_ipl_match', (data: { matchKey: string }) => {
-            socket.leave(`ipl:match:${data.matchKey}`);
-            socket.leave(`ipl:match:${data.matchKey}:contests`);
-            socket.leave(`ipl:match:${data.matchKey}:micro`);
-        });
-
-        socket.on('join_ipl_lobby', () => {
-            socket.join('ipl:matches');
-            console.log(`Socket ${socket.id} joined IPL lobby`);
-        });
-
         socket.on('disconnect', () => {
             console.log(`Merchant Client disconnected: ${socket.id}`);
         });
@@ -69,17 +50,5 @@ export const emitMarketDeleted = (marketId: string) => {
     if (io) {
         io.to(`market:${marketId}`).emit('market_deleted', { marketId });
         io.emit('global_market_deleted', { marketId });
-    }
-};
-
-export const emitMicroContestOpen = (matchKey: string, payload: any) => {
-    if (io) {
-        io.to(`ipl:match:${matchKey}:micro`).emit('micro_contest_open', payload);
-    }
-};
-
-export const emitMicroContestSettled = (matchKey: string, payload: any) => {
-    if (io) {
-        io.to(`ipl:match:${matchKey}:micro`).emit('micro_contest_settled', payload);
     }
 };

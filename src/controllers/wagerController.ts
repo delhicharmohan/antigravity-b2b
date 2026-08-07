@@ -78,10 +78,9 @@ export const placeWager = async (req: Request, res: Response) => {
         // --- Security Hardenings ---
 
         // 1. Cooling-off Period (Anti-Sniping)
-        // Block betting 5 minutes before the technical closure timestamp for PRE-MATCH markets
-        // IPL Micro markets are managed strictly by LiveContestEngine and don't need this buffer.
+        // Block betting 5 minutes before the technical closure timestamp
         const COOLING_OFF_MS = 5 * 60 * 1000;
-        if (marketData.category !== 'IPL Micro' && Date.now() > (Number(marketData.closure_timestamp) - COOLING_OFF_MS)) {
+        if (Date.now() > (Number(marketData.closure_timestamp) - COOLING_OFF_MS)) {
             throw new Error('Market is in cooling-off period. New wagers are no longer accepted.');
         }
 
