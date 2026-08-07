@@ -13,7 +13,7 @@ export class GeminiOracle {
         if (key && key !== 'PLACE_YOUR_API_KEY_HERE') {
             this.genAI = new GoogleGenerativeAI(key);
             this.model = this.genAI.getGenerativeModel({
-                model: "gemini-2.0-flash",
+                model: "gemini-2.5-flash",
                 tools: [
                     {
                         googleSearch: {}
