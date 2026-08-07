@@ -8,6 +8,17 @@ export interface Merchant {
     balance: number;
 }
 
+export interface MarketGroup {
+    id: string;
+    title: string;
+    description?: string;
+    category: string;
+    image_url?: string;
+    status: 'ACTIVE' | 'CLOSED' | 'ARCHIVED';
+    created_at: string;
+    markets?: Market[];
+}
+
 export interface Market {
     id: string;
     title: string;
@@ -20,13 +31,17 @@ export interface Market {
     };
     total_pool: number; // Derived
     volume_24h: number;
+    group_id?: string;
+    market_type: 'BINARY' | 'MULTI';
+    options: string[];                // e.g. ["India", "China", "Malaysia"]
+    pools: Record<string, number>;    // e.g. {"india": 500, "china": 300}
 }
 
 export interface Wager {
     id?: string;
     merchant_id: string;
     market_id: string;
-    selection: 'yes' | 'no';
+    selection: string;  // 'yes'/'no' for BINARY, any option string for MULTI
     stake: number;
     timestamp: number;
     status: 'ACCEPTED' | 'REJECTED';
@@ -43,3 +58,4 @@ export interface Transaction {
     description?: string;
     created_at: number;
 }
+

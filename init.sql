@@ -136,6 +136,45 @@ END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wagers_idempotency ON wagers(merchant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
+-- === MARKET GROUPS & MULTI-OPTION MARKETS ===
+
+-- Market Groups: bundles multiple related markets under one theme
+CREATE TABLE IF NOT EXISTS market_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    category VARCHAR(100) DEFAULT 'General',
+    image_url TEXT,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Link markets to groups (nullable — standalone markets have no group)
+DO $$
+BEGIN
+    ALTER TABLE markets ADD COLUMN group_id UUID REFERENCES market_groups(id) ON DELETE SET NULL;
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Market type: BINARY (yes/no) or MULTI (N-way options)
+DO $$
+BEGIN
+    ALTER TABLE markets ADD COLUMN market_type VARCHAR(20) DEFAULT 'BINARY';
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Option labels for multi-option markets (e.g. ["India","China","Malaysia"])
+DO $$
+BEGIN
+    ALTER TABLE markets ADD COLUMN options JSONB DEFAULT '[]';
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_markets_group_id ON markets(group_id);
+CREATE INDEX IF NOT EXISTS idx_markets_market_type ON markets(market_type);
 
 -- Seed Data
 -- NOTE: api_key_hash = SHA-256('test_key') = 92488e1e...

@@ -35,4 +35,9 @@ router.get('/webhooks/logs', adminController.listWebhookLogs);
 router.get('/markets/:id/payouts', adminController.getMarketPayoutSummary);
 router.get('/trends', adminController.getTrends);
 
+// Market Groups
+router.post('/market-groups', adminController.createMarketGroupController);
+router.get('/market-groups', adminController.listMarketGroupsController);
+router.delete('/market-groups/:id', adminController.deleteMarketGroupController);
+
 export default router;

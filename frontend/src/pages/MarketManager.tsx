@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { adminApi } from '../api';
-import { Plus, Clock, BarChart3, TrendingUp, Sparkles, Edit2, Trash2, X, CalendarX, Check } from 'lucide-react';
+import { Plus, Clock, BarChart3, TrendingUp, Sparkles, Edit2, Trash2, X, CalendarX, Check, Layers, List } from 'lucide-react';
 
 function Countdown({ timestamp, label, color }: { timestamp: number, label?: string, color?: string }) {
     const [timeLeft, setTimeLeft] = useState('');
@@ -67,11 +67,12 @@ export default function MarketManager() {
     const settleDateParam = queryParams.get('settleDate');
 
     const [markets, setMarkets] = useState<any[]>([]);
-    const [formData, setFormData] = useState({ title: '', duration: 3600, yes: 0, no: 0, category: 'Other' });
+    const [formData, setFormData] = useState({ title: '', duration: 3600, yes: 0, no: 0, category: 'Other', market_type: 'BINARY' as 'BINARY' | 'MULTI', options: ['', ''] as string[], initLiquidity: 0, group_id: '' });
     const [lastRun, setLastRun] = useState<string | null>(null);
     const [isRunning, setIsRunning] = useState(false);
     const [editingMarket, setEditingMarket] = useState<any | null>(null);
     const [settlingMarket, setSettlingMarket] = useState<any | null>(null);
+    const [settleOutcome, setSettleOutcome] = useState<string>('');
     const [editData, setEditData] = useState({ title: '', status: '', category: '' });
     const [selectedPayouts, setSelectedPayouts] = useState<any | null>(null);
     const [filterMode, setFilterMode] = useState<'OPEN' | 'RESOLVING' | 'SETTLED' | 'ALL'>('OPEN');
@@ -84,6 +85,10 @@ export default function MarketManager() {
     const [scoutPreviewMarkets, setScoutPreviewMarkets] = useState<any[]>([]);
     const [showScoutPreview, setShowScoutPreview] = useState(false);
     const [isSavingAll, setIsSavingAll] = useState(false);
+    // Market Groups
+    const [marketGroups, setMarketGroups] = useState<any[]>([]);
+    const [showGroupModal, setShowGroupModal] = useState(false);
+    const [groupFormData, setGroupFormData] = useState({ title: '', description: '', category: 'Other' });
 
     const CATEGORIES = ['Crypto', 'Finance', 'NFL', 'NBA', 'Cricket', 'Football', 'Politics', 'Election', 'Other'];
     const TERMS = ['Ultra Short', 'Short', 'Long'];
@@ -175,6 +180,7 @@ export default function MarketManager() {
 
     useEffect(() => {
         fetchMarkets();
+        fetchGroups();
         const interval = setInterval(fetchMarkets, 10000);
 
         const handleSocketUpdate = () => {
@@ -198,18 +204,65 @@ export default function MarketManager() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            await adminApi.createMarket({
-                title: formData.title,
-                durationSeconds: Number(formData.duration),
-                initYes: Number(formData.yes),
-                initNo: Number(formData.no),
-                category: formData.category
-            });
-            setFormData({ title: '', duration: 3600, yes: 0, no: 0, category: 'Other' });
+            if (formData.market_type === 'MULTI') {
+                const validOptions = formData.options.filter(o => o.trim() !== '');
+                if (validOptions.length < 2) {
+                    alert('Multi-option markets require at least 2 options');
+                    return;
+                }
+                await adminApi.createMarket({
+                    title: formData.title,
+                    durationSeconds: Number(formData.duration),
+                    market_type: 'MULTI',
+                    options: validOptions,
+                    initLiquidity: Number(formData.initLiquidity),
+                    category: formData.category,
+                    group_id: formData.group_id || undefined
+                });
+            } else {
+                await adminApi.createMarket({
+                    title: formData.title,
+                    durationSeconds: Number(formData.duration),
+                    initYes: Number(formData.yes),
+                    initNo: Number(formData.no),
+                    category: formData.category,
+                    group_id: formData.group_id || undefined
+                });
+            }
+            setFormData({ title: '', duration: 3600, yes: 0, no: 0, category: 'Other', market_type: 'BINARY', options: ['', ''], initLiquidity: 0, group_id: '' });
             fetchMarkets();
+            fetchGroups();
         } catch (error) {
             console.error(error);
         }
+    };
+
+    const fetchGroups = async () => {
+        try {
+            const res = await adminApi.listMarketGroups();
+            setMarketGroups(res.data);
+        } catch (error) { console.error(error); }
+    };
+
+    const handleCreateGroup = async (e: React.FormEvent) => {
+        e.preventDefault();
+        try {
+            await adminApi.createMarketGroup(groupFormData);
+            setGroupFormData({ title: '', description: '', category: 'Other' });
+            setShowGroupModal(false);
+            fetchGroups();
+        } catch (error) {
+            console.error(error);
+            alert('Failed to create market group');
+        }
+    };
+
+    const handleDeleteGroup = async (id: string) => {
+        if (!confirm('Delete this market group? Markets will be unlinked.')) return;
+        try {
+            await adminApi.deleteMarketGroup(id);
+            fetchGroups();
+        } catch (error) { console.error(error); }
     };
 
     const handleDelete = async (id: string) => {
@@ -236,11 +289,12 @@ export default function MarketManager() {
         }
     };
 
-    const handleManualSettle = async (id: string, outcome: 'yes' | 'no') => {
-        if (!confirm(`Are you sure you want to settle this market as ${outcome.toUpperCase()}?`)) return;
+    const handleManualSettle = async (id: string, outcome: string) => {
+        if (!confirm(`Are you sure you want to settle this market as "${outcome.toUpperCase()}"?`)) return;
         try {
             await adminApi.settleMarket(id, outcome);
             setSettlingMarket(null);
+            setSettleOutcome('');
             fetchMarkets();
         } catch (error) {
             console.error(error);
@@ -389,64 +443,140 @@ export default function MarketManager() {
             )}
 
             <section className="glass-card" style={{ marginBottom: '3rem', padding: '2rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
-                        <TrendingUp size={18} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
+                            <TrendingUp size={18} />
+                        </div>
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Launch New Market</h3>
                     </div>
-                    <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Launch New Market</h3>
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                            <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, market_type: 'BINARY' })}
+                                style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', border: 'none', background: formData.market_type === 'BINARY' ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.03)', color: formData.market_type === 'BINARY' ? 'white' : 'var(--text-muted)' }}
+                            ><Check size={14} />Binary</button>
+                            <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, market_type: 'MULTI' })}
+                                style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', border: 'none', borderLeft: '1px solid rgba(255,255,255,0.1)', background: formData.market_type === 'MULTI' ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.03)', color: formData.market_type === 'MULTI' ? 'white' : 'var(--text-muted)' }}
+                            ><List size={14} />Multi-Option</button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowGroupModal(true)}
+                            className="btn-premium"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                        ><Layers size={14} /> New Group</button>
+                    </div>
                 </div>
 
-                <form onSubmit={handleCreate} style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', alignItems: 'end' }}>
-                    <div style={{ gridColumn: 'span 3' }}>
-                        <label className="label">Proposition Title</label>
-                        <input
-                            className="input-glow"
-                            value={formData.title}
-                            onChange={e => setFormData({ ...formData, title: e.target.value })}
-                            placeholder="e.g. Will ETH break $10,000 this year?"
-                        />
+                <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', alignItems: 'end' }}>
+                        <div style={{ gridColumn: formData.market_type === 'MULTI' ? 'span 4' : 'span 3' }}>
+                            <label className="label">Proposition Title</label>
+                            <input
+                                className="input-glow"
+                                value={formData.title}
+                                onChange={e => setFormData({ ...formData, title: e.target.value })}
+                                placeholder={formData.market_type === 'MULTI' ? 'e.g. Which country will win maximum gold?' : 'e.g. Will ETH break $10,000 this year?'}
+                            />
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                            <label className="label">Category</label>
+                            <select
+                                className="input-glow"
+                                style={{ background: 'var(--bg-card)', color: 'var(--text-white)' }}
+                                value={formData.category}
+                                onChange={e => setFormData({ ...formData, category: e.target.value })}
+                            >
+                                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                            <label className="label">Expiry (Sec)</label>
+                            <input
+                                className="input-glow"
+                                type="number"
+                                value={formData.duration}
+                                onChange={e => setFormData({ ...formData, duration: Number(e.target.value) })}
+                            />
+                        </div>
+                        {formData.market_type === 'BINARY' ? (
+                            <>
+                                <div style={{ gridColumn: 'span 2' }}>
+                                    <label className="label">Seed YES</label>
+                                    <input className="input-glow" type="number" value={formData.yes} onChange={e => setFormData({ ...formData, yes: Number(e.target.value) })} />
+                                </div>
+                                <div style={{ gridColumn: 'span 2' }}>
+                                    <label className="label">Seed NO</label>
+                                    <input className="input-glow" type="number" value={formData.no} onChange={e => setFormData({ ...formData, no: Number(e.target.value) })} />
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ gridColumn: 'span 2' }}>
+                                <label className="label">Seed Liquidity</label>
+                                <input className="input-glow" type="number" value={formData.initLiquidity} onChange={e => setFormData({ ...formData, initLiquidity: Number(e.target.value) })} />
+                            </div>
+                        )}
+                        {marketGroups.length > 0 && (
+                            <div style={{ gridColumn: 'span 2' }}>
+                                <label className="label">Group (Optional)</label>
+                                <select
+                                    className="input-glow"
+                                    style={{ background: 'var(--bg-card)', color: 'var(--text-white)' }}
+                                    value={formData.group_id}
+                                    onChange={e => setFormData({ ...formData, group_id: e.target.value })}
+                                >
+                                    <option value="">No Group</option>
+                                    {marketGroups.map((g: any) => <option key={g.id} value={g.id}>{g.title}</option>)}
+                                </select>
+                            </div>
+                        )}
                     </div>
-                    <div style={{ gridColumn: 'span 2' }}>
-                        <label className="label">Category</label>
-                        <select
-                            className="input-glow"
-                            style={{ background: 'var(--bg-card)', color: 'var(--text-white)' }}
-                            value={formData.category}
-                            onChange={e => setFormData({ ...formData, category: e.target.value })}
-                        >
-                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                    </div>
-                    <div style={{ gridColumn: 'span 2' }}>
-                        <label className="label">Expiry (Sec)</label>
-                        <input
-                            className="input-glow"
-                            type="number"
-                            value={formData.duration}
-                            onChange={e => setFormData({ ...formData, duration: Number(e.target.value) })}
-                        />
-                    </div>
-                    <div style={{ gridColumn: 'span 2' }}>
-                        <label className="label">Seed YES</label>
-                        <input
-                            className="input-glow"
-                            type="number"
-                            value={formData.yes}
-                            onChange={e => setFormData({ ...formData, yes: Number(e.target.value) })}
-                        />
-                    </div>
-                    <div style={{ gridColumn: 'span 2' }}>
-                        <label className="label">Seed NO</label>
-                        <input
-                            className="input-glow"
-                            type="number"
-                            value={formData.no}
-                            onChange={e => setFormData({ ...formData, no: Number(e.target.value) })}
-                        />
-                    </div>
-                    <div style={{ gridColumn: 'span 1' }}>
-                        <button type="submit" className="btn-premium" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem' }}>
-                            <Plus size={20} />
+
+                    {formData.market_type === 'MULTI' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label className="label" style={{ margin: 0 }}>Options</label>
+                                <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, options: [...formData.options, ''] })}
+                                    className="btn-premium"
+                                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                                ><Plus size={12} /> Add Option</button>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                                {formData.options.map((opt, idx) => (
+                                    <div key={idx} style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <input
+                                            className="input-glow"
+                                            value={opt}
+                                            onChange={e => {
+                                                const newOpts = [...formData.options];
+                                                newOpts[idx] = e.target.value;
+                                                setFormData({ ...formData, options: newOpts });
+                                            }}
+                                            placeholder={`Option ${idx + 1}`}
+                                            style={{ flex: 1 }}
+                                        />
+                                        {formData.options.length > 2 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, options: formData.options.filter((_, i) => i !== idx) })}
+                                                style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '0 0.25rem' }}
+                                            ><X size={14} /></button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button type="submit" className="btn-premium" style={{ padding: '0.6rem 1.5rem' }}>
+                            <Plus size={16} /> Create {formData.market_type === 'MULTI' ? 'Multi-Option' : 'Binary'} Market
                         </button>
                     </div>
                 </form>
@@ -528,8 +658,8 @@ export default function MarketManager() {
                             <tr>
                                 <th>Proposition</th>
                                 <th>Status</th>
-                                <th>Probability (Y/N)</th>
-                                <th>Odds (Y/N)</th>
+                                <th>Probabilities</th>
+                                <th>Odds</th>
                                 <th>Volume</th>
                                 <th>Confidence</th>
                                 <th>Timeline</th>
@@ -562,13 +692,23 @@ export default function MarketManager() {
                                         }
                                     }} style={{ cursor: m.status === 'SETTLED' ? 'pointer' : 'default' }}>
                                         <td style={{ maxWidth: '300px' }}>
-                                            <div style={{ marginBottom: '0.25rem', display: 'flex', gap: '0.4rem' }}>
+                                            <div style={{ marginBottom: '0.25rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                                                 <span className="badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent-primary)', border: '1px solid rgba(139, 92, 246, 0.2)' }}>
                                                     {m.category || 'Other'}
                                                 </span>
                                                 {m.term && (
                                                     <span className="badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
                                                         {m.term}
+                                                    </span>
+                                                )}
+                                                {(m.market_type === 'MULTI') && (
+                                                    <span className="badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', background: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.2)' }}>
+                                                        MULTI ({(m.options || []).length})
+                                                    </span>
+                                                )}
+                                                {m.group_id && (
+                                                    <span className="badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', background: 'rgba(96, 165, 250, 0.1)', color: '#93c5fd', border: '1px solid rgba(96, 165, 250, 0.15)' }}>
+                                                        <Layers size={10} style={{ marginRight: '0.2rem' }} /> Grouped
                                                     </span>
                                                 )}
                                             </div>
@@ -581,20 +721,47 @@ export default function MarketManager() {
                                             </span>
                                         </td>
                                         <td>
-                                            <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
-                                                <div style={{ color: '#4ade80', fontWeight: 700 }}>{((m.probabilities?.yes ?? 0) * 100).toFixed(1)}%</div>
-                                                <div style={{ color: '#f87171', fontWeight: 700 }}>{((m.probabilities?.no ?? 0) * 100).toFixed(1)}%</div>
-                                            </div>
-                                            <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                                                <span>Y: {Number(m.pool_yes || 0).toLocaleString()}</span>
-                                                <span>N: {Number(m.pool_no || 0).toLocaleString()}</span>
-                                            </div>
+                                            {(m.market_type === 'MULTI') ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', fontSize: '0.75rem' }}>
+                                                    {Object.entries(m.probabilities || {}).slice(0, 4).map(([key, val]: [string, any]) => (
+                                                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                                            <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{key}</span>
+                                                            <span style={{ color: '#fbbf24', fontWeight: 700 }}>{(val * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                    ))}
+                                                    {Object.keys(m.probabilities || {}).length > 4 && (
+                                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>+{Object.keys(m.probabilities).length - 4} more</div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
+                                                        <div style={{ color: '#4ade80', fontWeight: 700 }}>{((m.probabilities?.yes ?? 0) * 100).toFixed(1)}%</div>
+                                                        <div style={{ color: '#f87171', fontWeight: 700 }}>{((m.probabilities?.no ?? 0) * 100).toFixed(1)}%</div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                                        <span>Y: {Number(m.pool_yes || 0).toLocaleString()}</span>
+                                                        <span>N: {Number(m.pool_no || 0).toLocaleString()}</span>
+                                                    </div>
+                                                </>
+                                            )}
                                         </td>
                                         <td>
-                                            <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
-                                                <div style={{ color: '#4ade80' }}>{(m.odds?.yes ?? 0).toFixed(2)}x</div>
-                                                <div style={{ color: '#f87171' }}>{(m.odds?.no ?? 0).toFixed(2)}x</div>
-                                            </div>
+                                            {(m.market_type === 'MULTI') ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', fontSize: '0.75rem' }}>
+                                                    {Object.entries(m.odds || {}).slice(0, 4).map(([key, val]: [string, any]) => (
+                                                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                                            <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{key}</span>
+                                                            <span style={{ color: '#fbbf24' }}>{typeof val === 'object' ? (val.odds || 0).toFixed(2) : Number(val).toFixed(2)}x</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem' }}>
+                                                    <div style={{ color: '#4ade80' }}>{(m.odds?.yes ?? 0).toFixed(2)}x</div>
+                                                    <div style={{ color: '#f87171' }}>{(m.odds?.no ?? 0).toFixed(2)}x</div>
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="mono">${Number(m.total_pool).toLocaleString()}</td>
                                         <td>
@@ -699,40 +866,106 @@ export default function MarketManager() {
 
             {settlingMarket && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div className="glass-card animate-slide-up" style={{ width: '400px', padding: '2rem', textAlign: 'center' }}>
+                    <div className="glass-card animate-slide-up" style={{ width: '450px', padding: '2rem', textAlign: 'center' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', textAlign: 'left' }}>
                             <div>
                                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Manual Settlement</h3>
                                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Choose final outcome</p>
                             </div>
-                            <button onClick={() => setSettlingMarket(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+                            <button onClick={() => { setSettlingMarket(null); setSettleOutcome(''); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
                         </div>
 
                         <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', textAlign: 'left' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>MARKET</div>
                             <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>{settlingMarket.title}</div>
+                            {settlingMarket.market_type === 'MULTI' && (
+                                <div style={{ fontSize: '0.7rem', color: '#fbbf24', marginTop: '0.3rem' }}>Multi-Option Market · {(settlingMarket.options || []).length} options</div>
+                            )}
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                            <button
-                                onClick={() => handleManualSettle(settlingMarket.id, 'yes')}
-                                className="btn-premium"
-                                style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', borderColor: 'rgba(74, 222, 128, 0.2)', padding: '1rem' }}
-                            >
-                                Settle YES
-                            </button>
-                            <button
-                                onClick={() => handleManualSettle(settlingMarket.id, 'no')}
-                                className="btn-premium"
-                                style={{ background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', borderColor: 'rgba(248, 113, 113, 0.2)', padding: '1rem' }}
-                            >
-                                Settle NO
-                            </button>
-                        </div>
+                        {settlingMarket.market_type === 'MULTI' ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
+                                {(settlingMarket.options || []).map((opt: string, idx: number) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => handleManualSettle(settlingMarket.id, opt.toLowerCase().trim())}
+                                        className="btn-premium"
+                                        style={{ background: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.2)', padding: '0.8rem', textTransform: 'capitalize' }}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <button
+                                    onClick={() => handleManualSettle(settlingMarket.id, 'yes')}
+                                    className="btn-premium"
+                                    style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', borderColor: 'rgba(74, 222, 128, 0.2)', padding: '1rem' }}
+                                >
+                                    Settle YES
+                                </button>
+                                <button
+                                    onClick={() => handleManualSettle(settlingMarket.id, 'no')}
+                                    className="btn-premium"
+                                    style={{ background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', borderColor: 'rgba(248, 113, 113, 0.2)', padding: '1rem' }}
+                                >
+                                    Settle NO
+                                </button>
+                            </div>
+                        )}
 
                         <p style={{ marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             Warning: Manual settlement is final and will trigger payouts immediately.
                         </p>
+                    </div>
+                </div>
+            )}
+
+            {showGroupModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="glass-card animate-slide-up" style={{ width: '450px', padding: '2rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+                            <div>
+                                <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Create Market Group</h3>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Bundle related markets under one theme</p>
+                            </div>
+                            <button onClick={() => setShowGroupModal(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleCreateGroup} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <div>
+                                <label className="label">Group Title</label>
+                                <input className="input-glow" value={groupFormData.title} onChange={e => setGroupFormData({ ...groupFormData, title: e.target.value })} placeholder="e.g. Bitcoin Price Predictions" />
+                            </div>
+                            <div>
+                                <label className="label">Description</label>
+                                <input className="input-glow" value={groupFormData.description} onChange={e => setGroupFormData({ ...groupFormData, description: e.target.value })} placeholder="Optional description" />
+                            </div>
+                            <div>
+                                <label className="label">Category</label>
+                                <select className="input-glow" style={{ background: 'var(--bg-card)', color: 'var(--text-white)' }} value={groupFormData.category} onChange={e => setGroupFormData({ ...groupFormData, category: e.target.value })}>
+                                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <button type="submit" className="btn-premium" style={{ marginTop: '0.5rem', justifyContent: 'center' }}><Layers size={16} /> Create Group</button>
+                        </form>
+
+                        {marketGroups.length > 0 && (
+                            <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Existing Groups</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    {marketGroups.map((g: any) => (
+                                        <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{g.title}</div>
+                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{(g.markets || []).length} markets · {g.category}</div>
+                                            </div>
+                                            <button onClick={() => handleDeleteGroup(g.id)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}><Trash2 size={14} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

@@ -60,6 +60,19 @@ export const placeWager = async (req: Request, res: Response) => {
             throw new Error('Betting window has closed for this event.');
         }
 
+        // 2a. Validate selection against market type
+        const marketType = marketData.market_type || 'BINARY';
+        if (marketType === 'MULTI') {
+            const validOptions = (marketData.options || []).map((o: string) => o.toLowerCase().trim());
+            if (validOptions.length > 0 && !validOptions.includes(normalizedSelection)) {
+                throw new Error(`Invalid selection "${normalizedSelection}". Valid options: ${validOptions.join(', ')}`);
+            }
+        } else {
+            if (!['yes', 'no'].includes(normalizedSelection)) {
+                throw new Error('Selection must be "yes" or "no" for binary markets.');
+            }
+        }
+
         // 2. Balance Check & Deduct
         const deductRes = await client.query(
             `UPDATE merchants
@@ -86,7 +99,13 @@ export const placeWager = async (req: Request, res: Response) => {
 
         // 2. Liquidity Guard (Anti-Manipulation)
         // Prevent a single bet from exceeding 50% of the CURRENT total pool to avoid extreme odds skew
-        const currentTotalPool = Number(marketData.pool_yes) + Number(marketData.pool_no);
+        let currentTotalPool: number;
+        if (marketType === 'MULTI') {
+            const poolsObj = marketData.pools || {};
+            currentTotalPool = Object.values(poolsObj).reduce((sum: number, val: any) => sum + Number(val), 0);
+        } else {
+            currentTotalPool = Number(marketData.pool_yes) + Number(marketData.pool_no);
+        }
         const MAX_WAGER_PERCENT = 0.5;
         // Only apply if there is existing liquidity to avoid blocking initial bets
         if (currentTotalPool > 0 && stake > (currentTotalPool * MAX_WAGER_PERCENT)) {
@@ -111,18 +130,19 @@ export const placeWager = async (req: Request, res: Response) => {
         // Update Market Pool
         let updateRes;
         
-        if (['yes', 'no'].includes(normalizedSelection)) {
+        if (marketType === 'BINARY') {
             const poolCol = normalizedSelection === 'yes' ? 'pool_yes' : 'pool_no';
             updateRes = await client.query(
                 `UPDATE markets 
                  SET ${poolCol} = COALESCE(${poolCol}, 0) + $1,
+                     total_pool = COALESCE(total_pool, 0) + $1,
                      volume_24h = COALESCE(volume_24h, 0) + $1
                  WHERE id = $2
-                 RETURNING pool_yes, pool_no, total_pool`,
+                 RETURNING pool_yes, pool_no, total_pool, market_type, pools`,
                 [stake, marketId]
             );
         } else {
-            // N-way pool (Micro-contests)
+            // N-way pool (Multi-option markets)
             updateRes = await client.query(
                 `UPDATE markets 
                  SET pools = jsonb_set(
@@ -130,9 +150,10 @@ export const placeWager = async (req: Request, res: Response) => {
                      array[$1::text], 
                      to_jsonb(COALESCE((pools->>$1::text)::numeric, 0) + $2::numeric)
                  ),
+                 total_pool = COALESCE(total_pool, 0) + $2,
                  volume_24h = COALESCE(volume_24h, 0) + $2
                  WHERE id = $3
-                 RETURNING pools, total_pool`,
+                 RETURNING pools, total_pool, market_type`,
                 [normalizedSelection, stake, marketId]
             );
         }
@@ -144,8 +165,9 @@ export const placeWager = async (req: Request, res: Response) => {
         let newPool: Record<string, number> = {};
         let metrics: Record<string, any> = {};
         const merchantRake = merchant.config?.default_rake;
+        const returnedType = updateRes.rows[0].market_type || 'BINARY';
 
-        if (['yes', 'no'].includes(normalizedSelection)) {
+        if (returnedType === 'BINARY') {
             newPool = {
                 yes: Number(updateRes.rows[0].pool_yes || 0),
                 no: Number(updateRes.rows[0].pool_no || 0)
@@ -155,9 +177,11 @@ export const placeWager = async (req: Request, res: Response) => {
                 no: Totalisator.getMarketMetrics(newPool, 'no', merchantRake)
             };
         } else {
-            newPool = updateRes.rows[0].pools || {};
-            // For N-way, we might not want to emit metrics for ALL possible outcomes if there are many,
-            // but for micro-contests (6 outcomes), it's fine.
+            // Convert JSONB pools values to numbers
+            const rawPools = updateRes.rows[0].pools || {};
+            for (const key of Object.keys(rawPools)) {
+                newPool[key] = Number(rawPools[key]);
+            }
             for (const key of Object.keys(newPool)) {
                 metrics[key] = Totalisator.getMarketMetrics(newPool, key, merchantRake);
             }

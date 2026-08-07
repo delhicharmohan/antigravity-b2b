@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { query } from '../config/db';
 import crypto from 'crypto';
-import { createMarketService, settleMarket, voidMarket as voidMarketService } from '../services/marketService';
+import { createMarketService, settleMarket, voidMarket as voidMarketService, createMarketGroup as createGroupService, listMarketGroups as listGroupsService, deleteMarketGroup as deleteGroupService } from '../services/marketService';
 import { Totalisator } from '../core/totalisator';
 import { GeminiScout } from '../agent/geminiScout';
 import { emitMarketDeleted } from '../services/socketService';
@@ -55,23 +55,38 @@ export const listMerchants = async (req: Request, res: Response) => {
 };
 
 export const createMarket = async (req: Request, res: Response) => {
-    const { title, durationSeconds, initYes, initNo, category, term } = req.body;
+    const { title, durationSeconds, initYes, initNo, category, term, market_type, options, group_id, initLiquidity } = req.body;
 
     if (!title || !durationSeconds) {
         return res.status(400).json({ error: 'Title and durationSeconds are required' });
+    }
+
+    // Validate multi-option markets
+    const mType = (market_type || 'BINARY').toUpperCase();
+    if (mType === 'MULTI') {
+        if (!options || !Array.isArray(options) || options.length < 2) {
+            return res.status(400).json({ error: 'Multi-option markets require at least 2 options' });
+        }
+        if (options.length > 20) {
+            return res.status(400).json({ error: 'Maximum 20 options allowed per market' });
+        }
     }
 
     try {
         const market = await createMarketService(
             title,
             Number(durationSeconds),
-            Number(initYes),
-            Number(initNo),
+            Number(initYes || 0),
+            Number(initNo || 0),
             'Manual Admin Creation',
             0.85,
             undefined,
             category,
-            term
+            term,
+            mType,
+            options || [],
+            group_id,
+            initLiquidity ? Number(initLiquidity) : undefined
         );
         res.status(201).json(market);
     } catch (error: any) {
@@ -82,28 +97,56 @@ export const createMarket = async (req: Request, res: Response) => {
 
 export const listMarkets = async (req: Request, res: Response) => {
     try {
-        const result = await query('SELECT * FROM markets ORDER BY id DESC');
+        const result = await query('SELECT * FROM markets ORDER BY created_at DESC');
+
+        const rake = 0.05;
 
         const markets = result.rows.map(m => {
-            const pool = {
-                yes: parseFloat(m.pool_yes),
-                no: parseFloat(m.pool_no)
-            };
+            const marketType = m.market_type || 'BINARY';
 
-            // For admin view, we use a default platform rake or 0 for raw odds
-            const rake = 0.05;
-
-            return {
-                ...m,
-                odds: {
-                    yes: Totalisator.calculateOdds(pool, 'yes', rake),
-                    no: Totalisator.calculateOdds(pool, 'no', rake)
-                },
-                probabilities: {
-                    yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
-                    no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
+            if (marketType === 'MULTI') {
+                // Build pool data from JSONB pools
+                const poolData: Record<string, number> = {};
+                const rawPools = m.pools || {};
+                for (const key of Object.keys(rawPools)) {
+                    poolData[key] = Number(rawPools[key]);
                 }
-            };
+                const poolTotal = Object.values(poolData).reduce((sum, val) => sum + val, 0);
+
+                const metrics: Record<string, any> = {};
+                for (const key of Object.keys(poolData)) {
+                    metrics[key] = Totalisator.getMarketMetrics(poolData, key, rake);
+                }
+
+                return {
+                    ...m,
+                    pool_data: poolData,
+                    total_pool_calc: poolTotal,
+                    metrics,
+                    odds: metrics,
+                    probabilities: Object.fromEntries(
+                        Object.keys(poolData).map(k => [k, poolTotal > 0 ? poolData[k] / poolTotal : 1 / Math.max(Object.keys(poolData).length, 1)])
+                    )
+                };
+            } else {
+                // Standard binary
+                const pool = {
+                    yes: parseFloat(m.pool_yes),
+                    no: parseFloat(m.pool_no)
+                };
+
+                return {
+                    ...m,
+                    odds: {
+                        yes: Totalisator.calculateOdds(pool, 'yes', rake),
+                        no: Totalisator.calculateOdds(pool, 'no', rake)
+                    },
+                    probabilities: {
+                        yes: pool.yes + pool.no > 0 ? pool.yes / (pool.yes + pool.no) : 0.5,
+                        no: pool.yes + pool.no > 0 ? pool.no / (pool.yes + pool.no) : 0.5
+                    }
+                };
+            }
         });
 
         res.json(markets);
@@ -235,12 +278,12 @@ export const settleMarketController = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { outcome } = req.body;
 
-    if (!outcome || !['yes', 'no'].includes(outcome.toLowerCase())) {
-        return res.status(400).json({ error: 'Valid outcome ("yes" or "no") is required' });
+    if (!outcome || typeof outcome !== 'string' || outcome.trim().length === 0) {
+        return res.status(400).json({ error: 'A valid outcome string is required' });
     }
 
     try {
-        const result = await settleMarket(id, outcome.toLowerCase() as 'yes' | 'no');
+        const result = await settleMarket(id, outcome.toLowerCase().trim());
         res.json(result);
     } catch (error: any) {
         console.error('Settle Market Error:', error);
@@ -499,3 +542,50 @@ export const getTrends = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Failed to fetch trends' });
     }
 };
+
+// ============================================================
+// Market Group Controllers
+// ============================================================
+
+export const createMarketGroupController = async (req: Request, res: Response) => {
+    const { title, description, category, image_url } = req.body;
+
+    if (!title) {
+        return res.status(400).json({ error: 'Group title is required' });
+    }
+
+    try {
+        const group = await createGroupService(title, description, category, image_url);
+        res.status(201).json(group);
+    } catch (error: any) {
+        console.error('Create Market Group Error:', error);
+        res.status(500).json({ error: 'Failed to create market group' });
+    }
+};
+
+export const listMarketGroupsController = async (req: Request, res: Response) => {
+    try {
+        const groups = await listGroupsService();
+        res.json(groups);
+    } catch (error: any) {
+        console.error('List Market Groups Error:', error);
+        res.status(500).json({ error: 'Failed to list market groups' });
+    }
+};
+
+export const deleteMarketGroupController = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const deleteMarkets = req.query.deleteMarkets === 'true';
+
+    try {
+        const group = await deleteGroupService(id, deleteMarkets);
+        res.json({ message: 'Market group deleted successfully', group });
+    } catch (error: any) {
+        console.error('Delete Market Group Error:', error);
+        if (error.message === 'Market group not found') {
+            return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: 'Failed to delete market group' });
+    }
+};
+

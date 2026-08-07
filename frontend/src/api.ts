@@ -26,8 +26,18 @@ export const adminApi = {
     updateMerchant: (id: string, config: any) => adminApiInstance.put(`/merchants/${id}`, { config }),
     deleteMerchant: (id: string) => adminApiInstance.delete(`/merchants/${id}`),
 
-    createMarket: (data: { title: string; durationSeconds: number; initYes: number; initNo: number, category?: string, term?: string }) =>
-        adminApiInstance.post('/markets', data),
+    createMarket: (data: {
+        title: string;
+        durationSeconds: number;
+        initYes?: number;
+        initNo?: number;
+        category?: string;
+        term?: string;
+        market_type?: string;
+        options?: string[];
+        group_id?: string;
+        initLiquidity?: number;
+    }) => adminApiInstance.post('/markets', data),
     listMarkets: () => adminApiInstance.get('/markets'),
     updateMarket: (id: string, data: any) => adminApiInstance.put(`/markets/${id}`, data),
     deleteMarket: (id: string) => adminApiInstance.delete(`/markets/${id}`),
@@ -38,10 +48,17 @@ export const adminApi = {
     listWagers: () => adminApiInstance.get('/wagers'),
     getLogs: () => adminApiInstance.get('/logs'),
     getStats: (date?: string) => adminApiInstance.get('/stats', { params: { date } }),
-    settleMarket: (id: string, outcome: 'yes' | 'no') => adminApiInstance.post(`/markets/${id}/settle`, { outcome }),
+    settleMarket: (id: string, outcome: string) => adminApiInstance.post(`/markets/${id}/settle`, { outcome }),
     voidMarket: (id: string) => adminApiInstance.post(`/markets/${id}/void`),
     resolveMarket: (id: string) => adminApiInstance.post(`/markets/${id}/resolve`),
     getWebhookLogs: () => adminApiInstance.get('/webhooks/logs'),
     getMarketPayouts: (id: string) => adminApiInstance.get(`/markets/${id}/payouts`),
     getTrends: () => adminApiInstance.get('/trends'),
+
+    // Market Groups
+    createMarketGroup: (data: { title: string; description?: string; category?: string; image_url?: string }) =>
+        adminApiInstance.post('/market-groups', data),
+    listMarketGroups: () => adminApiInstance.get('/market-groups'),
+    deleteMarketGroup: (id: string, deleteMarkets?: boolean) =>
+        adminApiInstance.delete(`/market-groups/${id}`, { params: { deleteMarkets } }),
 };

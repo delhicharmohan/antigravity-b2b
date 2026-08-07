@@ -3,6 +3,97 @@ import { Totalisator } from '../core/totalisator';
 import { emitMarketStatusUpdate } from './socketService';
 import { SchedulerService } from './schedulerService';
 
+// ============================================================
+// Market Group Management
+// ============================================================
+
+export const createMarketGroup = async (
+    title: string,
+    description?: string,
+    category: string = 'General',
+    image_url?: string
+) => {
+    const result = await query(
+        `INSERT INTO market_groups (title, description, category, image_url)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [title, description || null, category, image_url || null]
+    );
+    return result.rows[0];
+};
+
+export const listMarketGroups = async () => {
+    // Fetch all groups with their child markets
+    const groupsRes = await query(
+        `SELECT * FROM market_groups ORDER BY created_at DESC`
+    );
+    const groups = groupsRes.rows;
+
+    if (groups.length === 0) return [];
+
+    // Fetch all markets that belong to any group
+    const marketsRes = await query(
+        `SELECT * FROM markets WHERE group_id IS NOT NULL ORDER BY created_at ASC`
+    );
+
+    // Attach markets to their groups
+    const marketsByGroup: Record<string, any[]> = {};
+    for (const m of marketsRes.rows) {
+        if (!marketsByGroup[m.group_id]) marketsByGroup[m.group_id] = [];
+        marketsByGroup[m.group_id].push(m);
+    }
+
+    return groups.map((g: any) => ({
+        ...g,
+        markets: marketsByGroup[g.id] || []
+    }));
+};
+
+export const deleteMarketGroup = async (groupId: string, deleteMarkets: boolean = false) => {
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
+
+        if (deleteMarkets) {
+            // Delete wagers for all markets in the group first
+            await client.query(
+                `DELETE FROM wagers WHERE market_id IN (SELECT id FROM markets WHERE group_id = $1)`,
+                [groupId]
+            );
+            // Delete the child markets
+            await client.query(
+                `DELETE FROM markets WHERE group_id = $1`,
+                [groupId]
+            );
+        } else {
+            // Unlink markets from the group (set group_id to NULL)
+            await client.query(
+                `UPDATE markets SET group_id = NULL WHERE group_id = $1`,
+                [groupId]
+            );
+        }
+
+        // Delete the group itself
+        const result = await client.query(
+            `DELETE FROM market_groups WHERE id = $1 RETURNING *`,
+            [groupId]
+        );
+
+        await client.query('COMMIT');
+
+        if (result.rows.length === 0) throw new Error('Market group not found');
+        return result.rows[0];
+    } catch (e: any) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+// ============================================================
+// Market Creation
+// ============================================================
+
 export const createMarketService = async (
     title: string,
     durationOrTimestamp: number | string,
@@ -12,9 +103,13 @@ export const createMarketService = async (
     confidenceScore: number = 0.85,
     resolutionTimestamp?: number | string,
     category: string = 'Other',
-    term: string = 'Ultra Short'
+    term: string = 'Ultra Short',
+    // New parameters for multi-option & groups
+    marketType: string = 'BINARY',
+    options: string[] = [],
+    groupId?: string,
+    initLiquidity?: number
 ) => {
-    // ... (existing implementation)
     let closureTime: number;
     let resolutionTime: number;
 
@@ -36,16 +131,43 @@ export const createMarketService = async (
         resolutionTime = closureTime + (30 * 60 * 1000);
     }
 
+    // Build pools and initial liquidity based on market type
+    let poolYes = 0;
+    let poolNo = 0;
+    let pools: Record<string, number> = {};
+    let totalPool = 0;
+
+    if (marketType === 'MULTI' && options.length >= 2) {
+        // Distribute liquidity evenly across all options
+        const totalLiq = initLiquidity || (initYes + initNo) || 0;
+        const perOption = totalLiq > 0 ? Math.floor(totalLiq / options.length) : 0;
+
+        for (const opt of options) {
+            const key = opt.toLowerCase().trim();
+            pools[key] = perOption;
+        }
+        totalPool = perOption * options.length;
+    } else {
+        // Standard binary market
+        poolYes = initYes || 0;
+        poolNo = initNo || 0;
+        totalPool = poolYes + poolNo;
+    }
+
     const result = await query(
-        `INSERT INTO markets (title, status, closure_timestamp, resolution_timestamp, pool_yes, pool_no, source_of_truth, confidence_score, category, term) 
-         VALUES ($1, 'OPEN', $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-        [title, closureTime, resolutionTime, initYes || 0, initNo || 0, sourceOfTruth, confidenceScore, category, term]
+        `INSERT INTO markets (title, status, closure_timestamp, resolution_timestamp, pool_yes, pool_no, pools, total_pool, source_of_truth, confidence_score, category, term, market_type, options, group_id) 
+         VALUES ($1, 'OPEN', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+        [title, closureTime, resolutionTime, poolYes, poolNo, JSON.stringify(pools), totalPool, sourceOfTruth, confidenceScore, category, term, marketType, JSON.stringify(options), groupId || null]
     );
 
     const newMarket = result.rows[0];
 
-    // Audit Trail: Create wagers for initial liquidity if they exist
-    if (initYes > 0 || initNo > 0) {
+    // Audit Trail: Create wagers for initial liquidity
+    const hasLiquidity = marketType === 'MULTI'
+        ? totalPool > 0
+        : (initYes > 0 || initNo > 0);
+
+    if (hasLiquidity) {
         try {
             // 1. Get or create System Merchant (Safely handle concurrency)
             let systemMerchantRes = await query(
@@ -57,18 +179,32 @@ export const createMarketService = async (
             );
             const systemMerchantId = systemMerchantRes.rows[0].id;
 
-            // 2. Create the wagers
-            if (initYes > 0) {
-                await query(
-                    "INSERT INTO wagers (merchant_id, market_id, selection, stake, status) VALUES ($1, $2, $3, $4, $5)",
-                    [systemMerchantId, newMarket.id, 'yes', initYes, 'ACCEPTED']
-                );
-            }
-            if (initNo > 0) {
-                await query(
-                    "INSERT INTO wagers (merchant_id, market_id, selection, stake, status) VALUES ($1, $2, $3, $4, $5)",
-                    [systemMerchantId, newMarket.id, 'no', initNo, 'ACCEPTED']
-                );
+            if (marketType === 'MULTI') {
+                // Create a wager for each option's initial liquidity
+                for (const opt of options) {
+                    const key = opt.toLowerCase().trim();
+                    const amount = pools[key];
+                    if (amount > 0) {
+                        await query(
+                            "INSERT INTO wagers (merchant_id, market_id, selection, stake, status) VALUES ($1, $2, $3, $4, $5)",
+                            [systemMerchantId, newMarket.id, key, amount, 'ACCEPTED']
+                        );
+                    }
+                }
+            } else {
+                // Standard binary audit wagers
+                if (initYes > 0) {
+                    await query(
+                        "INSERT INTO wagers (merchant_id, market_id, selection, stake, status) VALUES ($1, $2, $3, $4, $5)",
+                        [systemMerchantId, newMarket.id, 'yes', initYes, 'ACCEPTED']
+                    );
+                }
+                if (initNo > 0) {
+                    await query(
+                        "INSERT INTO wagers (merchant_id, market_id, selection, stake, status) VALUES ($1, $2, $3, $4, $5)",
+                        [systemMerchantId, newMarket.id, 'no', initNo, 'ACCEPTED']
+                    );
+                }
             }
         } catch (auditError) {
             console.error('[MarketService] Failed to create audit wagers:', auditError);
@@ -81,6 +217,10 @@ export const createMarketService = async (
 
     return newMarket;
 };
+
+// ============================================================
+// Market Settlement
+// ============================================================
 
 export const settleMarket = async (marketId: string, outcome: string) => {
     const client = await getClient();
@@ -99,15 +239,32 @@ export const settleMarket = async (marketId: string, outcome: string) => {
             return { success: true, message: 'Market already settled' } as any;
         }
 
+        // Build pool data based on market type
         let poolData: Record<string, number> = {};
-        if (market.pools && Object.keys(market.pools).length > 0) {
-            poolData = market.pools;
+        const marketType = market.market_type || 'BINARY';
+
+        if (marketType === 'MULTI') {
+            // Use the pools JSONB for multi-option markets
+            poolData = market.pools || {};
+
+            // Validate outcome is one of the defined options
+            const validOptions = (market.options || []).map((o: string) => o.toLowerCase().trim());
+            if (validOptions.length > 0 && !validOptions.includes(outcome.toLowerCase())) {
+                throw new Error(`Invalid outcome "${outcome}". Valid options: ${validOptions.join(', ')}`);
+            }
         } else {
-            poolData = {
-                yes: Number(market.pool_yes || 0),
-                no: Number(market.pool_no || 0)
-            };
+            // Binary market: use pool_yes/pool_no or pools JSONB
+            if (market.pools && Object.keys(market.pools).length > 0) {
+                poolData = market.pools;
+            } else {
+                poolData = {
+                    yes: Number(market.pool_yes || 0),
+                    no: Number(market.pool_no || 0)
+                };
+            }
         }
+
+        const normalizedOutcome = outcome.toLowerCase().trim();
 
         // 2. Fetch all wagers for this market
         const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
@@ -118,12 +275,12 @@ export const settleMarket = async (marketId: string, outcome: string) => {
 
         for (const wager of wagers) {
             let payout = 0;
-            if (wager.selection === outcome) {
+            if (wager.selection === normalizedOutcome) {
                 // Fetch merchant rake
                 const merchantRes = await client.query('SELECT config FROM merchants WHERE id = $1', [wager.merchant_id]);
                 const rake = merchantRes.rows[0]?.config?.default_rake;
 
-                payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, outcome, rake);
+                payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, normalizedOutcome, rake);
                 totalPayoutsCalculated += payout;
             }
 
@@ -142,15 +299,15 @@ export const settleMarket = async (marketId: string, outcome: string) => {
         // 4. Update market status
         await client.query(
             'UPDATE markets SET status = $1, outcome = $2 WHERE id = $3',
-            ['SETTLED', outcome, marketId]
+            ['SETTLED', normalizedOutcome, marketId]
         );
 
         await client.query('COMMIT');
 
         const { LoggerService } = await import('./loggerService');
-        await LoggerService.info(`[Settlement] ✅ Market ${marketId} settled as ${outcome.toUpperCase()}`, {
+        await LoggerService.info(`[Settlement] ✅ Market ${marketId} settled as ${normalizedOutcome.toUpperCase()}`, {
             marketId,
-            outcome,
+            outcome: normalizedOutcome,
             wagerCount: wagers.length,
             poolData
         });
@@ -166,7 +323,7 @@ export const settleMarket = async (marketId: string, outcome: string) => {
             const uniqueMerchants = [...new Set(finalWagers.map(w => w.merchant_id))];
             for (const merchantId of uniqueMerchants) {
                 const merchantWagers = finalWagers.filter(w => w.merchant_id === merchantId);
-                await WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', outcome, merchantWagers);
+                await WebhookService.notifySettlement(merchantId, marketId, 'SETTLED', normalizedOutcome, merchantWagers);
             }
         } catch (webhookError: any) {
             console.error(`[Settlement] Webhook delivery failed for market ${marketId}:`, webhookError.message);
@@ -187,6 +344,10 @@ export const settleMarket = async (marketId: string, outcome: string) => {
         client.release();
     }
 };
+
+// ============================================================
+// Market Voiding
+// ============================================================
 
 export const voidMarket = async (marketId: string) => {
     const client = await getClient();
@@ -244,6 +405,10 @@ export const voidMarket = async (marketId: string) => {
         client.release();
     }
 };
+
+// ============================================================
+// Market Closure
+// ============================================================
 
 export const closeMarket = async (marketId: string) => {
     const client = await getClient();

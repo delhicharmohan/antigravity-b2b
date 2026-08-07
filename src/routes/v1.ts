@@ -13,6 +13,10 @@ router.post('/wager', placeWager);
 router.get('/markets', marketController.listMarkets);
 router.get('/markets/:id', marketController.getMarketDetails);
 
+// Market Groups
+router.get('/market-groups', marketController.listMarketGroups);
+router.get('/market-groups/:id', marketController.getMarketGroupDetails);
+
 router.get('/balance', transactionController.getBalance);
 router.get('/transactions', transactionController.getTransactions);
 
