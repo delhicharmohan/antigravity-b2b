@@ -72,7 +72,6 @@ export default function MarketManager() {
     const [isRunning, setIsRunning] = useState(false);
     const [editingMarket, setEditingMarket] = useState<any | null>(null);
     const [settlingMarket, setSettlingMarket] = useState<any | null>(null);
-    const [settleOutcome, setSettleOutcome] = useState<string>('');
     const [editData, setEditData] = useState({ title: '', status: '', category: '' });
     const [selectedPayouts, setSelectedPayouts] = useState<any | null>(null);
     const [filterMode, setFilterMode] = useState<'OPEN' | 'RESOLVING' | 'SETTLED' | 'ALL'>('OPEN');
@@ -294,7 +293,6 @@ export default function MarketManager() {
         try {
             await adminApi.settleMarket(id, outcome);
             setSettlingMarket(null);
-            setSettleOutcome('');
             fetchMarkets();
         } catch (error) {
             console.error(error);
@@ -872,7 +870,7 @@ export default function MarketManager() {
                                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Manual Settlement</h3>
                                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Choose final outcome</p>
                             </div>
-                            <button onClick={() => { setSettlingMarket(null); setSettleOutcome(''); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+                            <button onClick={() => setSettlingMarket(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
                         </div>
 
                         <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', textAlign: 'left' }}>
