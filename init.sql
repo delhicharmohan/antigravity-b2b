@@ -58,6 +58,21 @@ BEGIN
     EXCEPTION
         WHEN duplicate_column THEN NULL;
     END;
+    BEGIN
+        ALTER TABLE markets ADD COLUMN pools JSONB DEFAULT '{}';
+    EXCEPTION
+        WHEN duplicate_column THEN NULL;
+    END;
+    BEGIN
+        ALTER TABLE markets ADD COLUMN total_pool DECIMAL(20, 2) DEFAULT 0;
+    EXCEPTION
+        WHEN duplicate_column THEN NULL;
+    END;
+    BEGIN
+        ALTER TABLE markets ADD COLUMN volume_24h DECIMAL(20, 2) DEFAULT 0;
+    EXCEPTION
+        WHEN duplicate_column THEN NULL;
+    END;
 END $$;
 
 CREATE TABLE IF NOT EXISTS webhook_logs (
