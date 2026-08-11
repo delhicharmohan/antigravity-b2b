@@ -137,13 +137,31 @@ export const createMarketService = async (
     let pools: Record<string, number> = {};
     let totalPool = 0;
 
+    // Sanitize option keys: strip special characters, keep only safe chars for DB constraints
+    const sanitizeKey = (s: string): string =>
+        s.toLowerCase().trim()
+            .replace(/[^a-z0-9 _-]/g, '')  // Remove arrows, commas, special chars
+            .replace(/\s+/g, ' ')           // Collapse whitespace
+            .trim()
+            .substring(0, 50)               // Enforce VARCHAR(50) limit
+        || 'option';                        // Fallback if empty after sanitize
+
+    // Sanitize options for MULTI markets before any processing
+    if (marketType === 'MULTI' && options.length >= 2) {
+        options = options.map((opt: string) => {
+            // Capitalize first letter of sanitized key for display
+            const clean = sanitizeKey(opt);
+            return clean.charAt(0).toUpperCase() + clean.slice(1);
+        });
+    }
+
     if (marketType === 'MULTI' && options.length >= 2) {
         // Distribute liquidity evenly across all options
         const totalLiq = initLiquidity || (initYes + initNo) || 0;
         const perOption = totalLiq > 0 ? Math.floor(totalLiq / options.length) : 0;
 
         for (const opt of options) {
-            const key = opt.toLowerCase().trim();
+            const key = sanitizeKey(opt);
             pools[key] = perOption;
         }
         totalPool = perOption * options.length;
@@ -182,7 +200,7 @@ export const createMarketService = async (
             if (marketType === 'MULTI') {
                 // Create a wager for each option's initial liquidity
                 for (const opt of options) {
-                    const key = opt.toLowerCase().trim();
+                    const key = sanitizeKey(opt);
                     const amount = pools[key];
                     if (amount > 0) {
                         await query(
