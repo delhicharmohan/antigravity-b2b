@@ -135,7 +135,6 @@ export const placeWager = async (req: Request, res: Response) => {
             updateRes = await client.query(
                 `UPDATE markets 
                  SET ${poolCol} = COALESCE(${poolCol}, 0) + $1,
-                     total_pool = COALESCE(total_pool, 0) + $1,
                      volume_24h = COALESCE(volume_24h, 0) + $1
                  WHERE id = $2
                  RETURNING pool_yes, pool_no, total_pool, market_type, pools`,
@@ -150,7 +149,6 @@ export const placeWager = async (req: Request, res: Response) => {
                      array[$1::text], 
                      to_jsonb(COALESCE((pools->>$1::text)::numeric, 0) + $2::numeric)
                  ),
-                 total_pool = COALESCE(total_pool, 0) + $2,
                  volume_24h = COALESCE(volume_24h, 0) + $2
                  WHERE id = $3
                  RETURNING pools, total_pool, market_type`,

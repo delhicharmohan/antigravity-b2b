@@ -89,7 +89,7 @@ export default function MarketManager() {
     const [showGroupModal, setShowGroupModal] = useState(false);
     const [groupFormData, setGroupFormData] = useState({ title: '', description: '', category: 'Other' });
 
-    const CATEGORIES = ['Crypto', 'Finance', 'NFL', 'NBA', 'Cricket', 'Football', 'Politics', 'Election', 'Other'];
+    const CATEGORIES = ['Crypto', 'Finance', 'Economy', 'Tech', 'NFL', 'NBA', 'Cricket', 'Football', 'Sports', 'Politics', 'Election', 'Science', 'Weather', 'Geopolitics', 'Culture', 'Other'];
     const TERMS = ['Ultra Short', 'Short', 'Long'];
 
     useEffect(() => {

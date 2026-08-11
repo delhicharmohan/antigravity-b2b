@@ -5,6 +5,7 @@ import { extractJson } from "../utils/jsonUtils";
 // Mock response for fallback
 const MOCK_MARKETS = [
     {
+        market_type: "BINARY",
         market_title: "Will Bitcoin (BTC) price exceed $100,000 within the next 7 days?",
         event_resolution_timestamp: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         source_of_truth: "CoinMarketCap official price data",
@@ -12,47 +13,19 @@ const MOCK_MARKETS = [
         category: "Crypto",
         term: "Ultra Short",
         initial_probability_yes: 0.55
+    },
+    {
+        market_type: "MULTI",
+        market_title: "Which major tech company will report the highest revenue growth this quarter?",
+        event_resolution_timestamp: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        source_of_truth: "SEC filings and earnings reports",
+        confidence_score: 0.80,
+        category: "Tech",
+        term: "Long",
+        options: ["Apple", "Microsoft", "NVIDIA", "Google", "Amazon"],
+        initial_liquidity: 1500
     }
 ];
-
-const marketSchema = {
-    type: SchemaType.ARRAY,
-    description: "A list of high-quality binary prediction markets categorized as Ultra Short Term (<7 days), Short Term (8-21 days), or Long Term (28-90 days).",
-    items: {
-        type: SchemaType.OBJECT,
-        properties: {
-            market_title: {
-                type: SchemaType.STRING,
-                description: "A clear, concise, and binary (Yes/No) question."
-            },
-            event_resolution_timestamp: {
-                type: SchemaType.STRING,
-                description: "The date and time (ISO 8601) when the actual event occurs and the outcome is known. Must fall within the specified term windows."
-            },
-            source_of_truth: {
-                type: SchemaType.STRING,
-                description: "The verifiable source that will determine the outcome."
-            },
-            confidence_score: {
-                type: SchemaType.NUMBER,
-                description: "The agent's confidence (0.75 to 0.95) in the topic's relevance and verifiability."
-            },
-            category: {
-                type: SchemaType.STRING,
-                description: "The market category. Must be one of: Crypto, Finance, NFL, Politics, NBA, Football, Election, Other."
-            },
-            term: {
-                type: SchemaType.STRING,
-                description: "The term of the market: 'Ultra Short' (<7 days), 'Short' (8-21 days), or 'Long' (28-90 days)."
-            },
-            initial_probability_yes: {
-                type: SchemaType.NUMBER,
-                description: "The estimated probability (0.05 to 0.95) that the 'Yes' outcome will occur based on current data."
-            }
-        },
-        required: ["market_title", "event_resolution_timestamp", "source_of_truth", "confidence_score", "category", "term", "initial_probability_yes"]
-    }
-};
 
 export class GeminiScout {
     private genAI: GoogleGenerativeAI | null = null;
@@ -90,84 +63,194 @@ export class GeminiScout {
 
         const queryContext = query ? `
         🎯 TARGETED INTENT: "${query}"
-        The user wants markets specifically related to this intent. Prioritize fulfilling this request while maintaining the resolution rules for Ultra Short, Short, and Long term markets.
-        ` : 'Generate diverse markets across the specified categories and terms.';
+        The user wants markets specifically related to this intent. Prioritize fulfilling this request while maintaining diversity in market types (binary AND multi-option) and resolution windows.
+        ` : 'Generate diverse markets across ALL categories. Do NOT cluster on just Crypto/Finance.';
 
         const prompt = `
-        You are an expert Prediction Market Analyst specializing in multi-horizon event forecasting.
+        You are an expert Prediction Market Analyst working for a platform competing with Kalshi and Polymarket.
+        Your job is to create ENGAGING, DIVERSE, and VERIFIABLE prediction markets that attract a wide audience.
         
         🌐 GROUNDING & VERIFICATION:
-        You MUST use Google Search to verify ACTUAL upcoming schedules, match dates, team lineups, and event details.
+        You MUST use Google Search to verify ACTUAL upcoming schedules, events, dates, and data.
         
-        🚨 STICK TO FACTS:
-        - DO NOT confuse Under-19 (U19), Women's, or 'A' teams with Senior National Teams.
-        - DO NOT attribute matches to players who are not in the squad or retired.
-        - If you see "Under 19 tour", clearly label the market as "U19".
-        - Verify match dates against today's date (${todayStr}).
-        - If an event is not found or the date is incorrect, DO NOT generate a market for it.
+        📅 TODAY: ${todayStr}
         
-        🚨 CRITICAL REQUIREMENTS:
-        - Today is ${todayStr}
-        - Generate ${count} markets across these three categories:
-            1. 🚀 ULTRA SHORT TERM: Resolution within 7 days (by ${day7}).
-            2. ⏱️ SHORT TERM: Resolution between 8 to 21 days (from ${day8} to ${day21}).
-            3. 📅 LONG TERM: Resolution between 28 to 90 days (from ${day28} to ${day90}).
-        - ALL markets must have verifiable outcomes within their respective windows.
-        - Use SPECIFIC numbers, dates, and events.
+        ===========================
+        MARKET TYPES (CRITICAL!)
+        ===========================
+        
+        You MUST generate TWO types of markets:
+        
+        1️⃣ BINARY MARKETS (Yes/No questions):
+           Set market_type = "BINARY"
+           Example: "Will the Federal Reserve cut rates at the September FOMC meeting?"
+           These need: initial_probability_yes (0.05-0.95)
+        
+        2️⃣ MULTI-OPTION MARKETS (Who/Which/What questions with 3-8 choices):
+           Set market_type = "MULTI"  
+           Example: "Which country will win the most gold medals at the 2026 Asian Games?"
+           These need: options (array of 3-8 choices), initial_liquidity (number, typically 1000-2000)
+        
+        🎯 MIX REQUIREMENT: Out of ${count} markets, generate AT LEAST 4 MULTI-OPTION markets.
+        
+        ===========================
+        CATEGORIES (USE ALL OF THEM!)
+        ===========================
+        
+        You MUST spread markets across these categories. Use AT LEAST 6 different categories:
+        
+        🏦 Economy — Fed rate decisions, inflation data, jobs reports, GDP, unemployment claims, CPI
+           Binary: "Will US CPI for August come in below 3%?"
+           Multi: "What will the Fed's rate decision be at the next FOMC?" → [Cut 25bps, Cut 50bps, Hold, Raise 25bps]
+        
+        💰 Crypto — Bitcoin, Ethereum, altcoin milestones, DeFi events, ETF flows, halving effects
+           Binary: "Will Bitcoin exceed $85,000 by ${day7}?"
+           Multi: "Which crypto will have the highest % gain this week?" → [BTC, ETH, SOL, XRP, BNB]
+        
+        📈 Finance — Earnings, IPOs, M&A, stock milestones, market indices, commodity prices
+           Binary: "Will NVIDIA's market cap exceed $4 trillion by ${day21}?"
+           Multi: "Which tech stock will outperform this quarter?" → [AAPL, MSFT, GOOGL, NVDA, META]
+        
+        🏏 Cricket — International matches, IPL, World Cup, player milestones, series outcomes
+           Binary: "Will India win the 3rd Test against England?"
+           Multi: "Who will be Player of the Match in the next India vs Australia ODI?" → [Kohli, Sharma, Smith, Cummins, Gill]
+        
+        ⚽ Football — Premier League, Champions League, La Liga, transfers, international matches
+           Binary: "Will Manchester City win their next Premier League match?"
+           Multi: "Who will win the Champions League 2026-27?" → [Real Madrid, Man City, Bayern Munich, PSG, Arsenal]
+        
+        🏈 NFL — Regular season, playoffs, player stats, draft picks, divisional races
+           Binary: "Will the Chiefs win their Week 1 opener?"
+           Multi: "Which team will win Super Bowl LXI?" → [Chiefs, Eagles, 49ers, Bills, Lions]
+        
+        🏀 NBA — Season games, playoffs, MVP race, trade impacts, scoring records
+           Binary: "Will LeBron James score 30+ points in his next game?"
+           Multi: "Who will win NBA MVP 2026-27?" → [Jokic, Luka, Tatum, Giannis, Shai]
+        
+        🗳️ Politics — Legislation, government actions, policy decisions, approval ratings
+           Binary: "Will the US Senate pass the infrastructure bill by September?"
+           Multi: "Which party will win the most seats in the next state election?" → [BJP, Congress, AAP, TMC, JDU]
+        
+        🗳️ Election — Upcoming elections, primary results, polling milestones
+           Binary: "Will voter turnout exceed 65% in the next UK general election?"
+           Multi: "Who will win the next presidential election in [country]?" → [Candidate A, B, C, D]
+        
+        🔬 Science — Space launches, climate records, scientific breakthroughs, Nobel predictions
+           Binary: "Will SpaceX successfully launch Starship before ${day21}?"
+           Multi: "Which country will land a spacecraft on the Moon next?" → [USA, China, India, Japan]
+        
+        💻 Tech — Product launches, AI milestones, app store rankings, company earnings, IPOs
+           Binary: "Will Apple announce a new iPhone at its September event?"
+           Multi: "Which AI model will top the LMSYS leaderboard by end of month?" → [GPT-5, Claude 4, Gemini 2.5, Llama 4]
+        
+        🌦️ Weather — Hurricane forecasts, temperature records, seasonal outliers, wildfire events
+           Binary: "Will a Category 4+ hurricane make US landfall in August 2026?"
+           Multi: "Which US city will record the highest temperature this week?" → [Phoenix, Las Vegas, Dallas, Houston, Miami]
+        
+        🌍 Geopolitics — Sanctions, treaties, UN votes, trade disputes, military actions
+           Binary: "Will the EU impose new sanctions on Russia by September?"
+           Multi: "Which country will be the next to join BRICS?" → [Turkey, Indonesia, Nigeria, Saudi Arabia, Thailand]
+        
+        🎬 Culture — Awards shows, box office, streaming records, viral moments, celebrity events
+           Binary: "Will the next Marvel movie gross $1B worldwide?"
+           Multi: "Which film will top the global box office this month?" → [Movie A, Movie B, Movie C, Movie D]
+        
+        🏅 Sports — Olympics, Tennis Grand Slams, F1, Golf majors, combat sports, esports
+           Binary: "Will Max Verstappen win the next F1 Grand Prix?"
+           Multi: "Who will win the next Tennis Grand Slam men's singles?" → [Djokovic, Sinner, Alcaraz, Medvedev]
+        
+        ===========================
+        TERM WINDOWS
+        ===========================
+        
+        Spread markets across these horizons:
+        1. 🚀 ULTRA SHORT: Resolution within 7 days (by ${day7})
+        2. ⏱️ SHORT: Resolution 8-21 days (${day8} to ${day21})
+        3. 📅 LONG: Resolution 28-90 days (${day28} to ${day90})
+        
+        ===========================
+        STRICT RULES
+        ===========================
+        
+        🚨 DIVERSITY:
+        - NO category may appear more than 3 times in a batch of ${count}
+        - At least 6 different categories MUST be represented
+        - At least 4 markets MUST be market_type "MULTI"
+        - Mix binary and multi-option across categories
+        
+        🚨 FACTS ONLY:
+        - DO NOT confuse U19/Women's/A-team events with Senior teams
+        - Verify match dates against today (${todayStr})
+        - If an event is NOT found or date is WRONG, skip it
+        - Use SPECIFIC numbers, dates, teams, and names
+        
+        📊 FINANCE/CRYPTO REALISM:
+        - Search for CURRENT PRICES before setting targets
+        - Stocks/Indexes: +/- 2-5% of current price for short-term
+        - Crypto: +/- 5-10% for short-term
+        
+        📊 SOURCES:
+        - Provide DIRECT URLs as source_of_truth (Yahoo Finance, CoinMarketCap, ESPN, Cricbuzz, etc.)
+        - For Football: use https://onefootball.com
+        - For NFL: use https://www.nfl.com/schedules
+        - For NBA: use https://www.nba.com/schedule
+        
         ${queryContext}
         
-        📊 FINANCE, STOCKS & CRYPTO REALISM:
-        - You MUST use Google Search to find the CURRENT PRICE of any stock, index, or crypto before creating a market.
-        - Targets MUST be realistic for the 1-7 day resolution window.
-        - VOLATILITY RULES:
-            - Stocks/Indexes: Targets should typically be within +/- 2-5% of current price.
-            - Crypto (BTC/ETH): Targets should typically be within +/- 5-10% of current price.
-        - HANDLING OUTLIERS:
-            - If a user intent asks for an unrealistic price (e.g., "Will Reliance reach 6000?" when it is at 3000):
-                1. Adjust the target to a "Closer Target Price" (e.g., "Will Reliance exceed 3100?") to ensure a balanced YES/NO probability.
-                2. If you MUST create an "impossible" market, set the confidence_score to reflect the extreme low probability (0.70-0.75 range) and explicitly state the current price in the source_of_truth description.
+        ===========================
+        OUTPUT FORMAT
+        ===========================
         
-        📊 SPORTS:
-        If applicable, generate specific match or player performance markets.
-        - For FOOTBALL (Soccer), you MUST use https://onefootball.com as the source_of_truth.
-        - For NFL (American Football), you MUST use https://www.nfl.com/schedules as the source_of_truth.
-        - For NBA (Basketball), you MUST use https://www.nba.com/schedule as the source_of_truth.
+        Return ONLY a JSON array. No markdown, no explanation.
         
-        ⚠️ STRICT RULES:
-        1. Resolution dates MUST fall exactly within the Ultra Short, Short, or Long term windows defined above.
-        2. Use ACTUAL match times and dates.
-        3. Confidence: 0.80-0.95 (High confidence in the DATA and EVENT occurrence).
-        4. source_of_truth: You MUST provide the DIRECT URL to the data source (e.g., Yahoo Finance, CoinMarketCap, Cricbuzz).
-        5. CATEGORIES: Categorize each market as: Crypto, Finance, NFL, Politics, NBA, Football, or Election.
-        6. TERM: You MUST label each market's term correctly.
+        For BINARY markets:
+        {
+          "market_type": "BINARY",
+          "market_title": "Will [X] happen by [date]?",
+          "event_resolution_timestamp": "ISO8601",
+          "source_of_truth": "URL",
+          "confidence_score": 0.85,
+          "category": "Economy",
+          "term": "Ultra Short",
+          "initial_probability_yes": 0.65
+        }
         
-        Generate ${count} markets based on the intent if provided, otherwise diverse across categories and terms.
+        For MULTI-OPTION markets:
+        {
+          "market_type": "MULTI",
+          "market_title": "Which/Who/What [question]?",
+          "event_resolution_timestamp": "ISO8601",
+          "source_of_truth": "URL",
+          "confidence_score": 0.85,
+          "category": "Football",
+          "term": "Short",
+          "options": ["Option A", "Option B", "Option C", "Option D"],
+          "initial_liquidity": 1500
+        }
         
-        RETURN ONLY A VALID JSON ARRAY. DO NOT include conversational text.
-        JSON format:
-        [
-          {
-            "market_title": "Will [Asset] reach [Target Price] by [Date]?",
-            "event_resolution_timestamp": "ISO8601",
-            "source_of_truth": "URL",
-            "confidence_score": 0.85,
-            "category": "...",
-            "term": "Ultra Short" | "Short" | "Long",
-            "initial_probability_yes": 0.65
-          }
-        ]
+        Generate ${count} markets NOW.
         `;
 
         try {
-            console.log(`[Scout] Generating ${count} markets across Ultra Short, Short, and Long terms...`);
+            console.log(`[Scout] Generating ${count} diverse markets (binary + multi-option)...`);
             const result = await this.model.generateContent(prompt);
             const response = result.response;
             const text = response.text();
             console.log("[Scout] AI Response received.");
 
-            // Clean up potentially wrapped JSON in markdown blocks
             const markets = extractJson(text);
-            console.log(`[Scout] Generated ${markets.length} short-term markets.`);
+            
+            // Log diversity stats
+            const types = { BINARY: 0, MULTI: 0 };
+            const categories: Record<string, number> = {};
+            for (const m of markets) {
+                const t = m.market_type || 'BINARY';
+                types[t as keyof typeof types] = (types[t as keyof typeof types] || 0) + 1;
+                categories[m.category] = (categories[m.category] || 0) + 1;
+            }
+            console.log(`[Scout] Generated ${markets.length} markets — Binary: ${types.BINARY}, Multi: ${types.MULTI}`);
+            console.log(`[Scout] Category spread: ${JSON.stringify(categories)}`);
+            
             return markets;
         } catch (error) {
             console.error("[Scout] Generation failed:", error);
@@ -193,9 +276,9 @@ export class GeminiScout {
         You MUST use Google Search to find ACTUAL, REAL-TIME trending keywords, topics, and events (as of today, ${new Date().toISOString().split('T')[0]}) from:
         1. X (formerly Twitter) Trending Topics
         2. Google Trends (Global and regional highlights)
-        3. Global News (Finance, Tech, Sports, Politics)
+        3. Global News (Finance, Tech, Sports, Politics, Science, Entertainment)
 
-        Provide a categorized list of high-impact keywords that would make excellent binary prediction markets.
+        Provide a categorized list of high-impact keywords that would make excellent prediction markets (both binary Yes/No AND multi-option Who/Which/What).
         Focus on events resolving within the next 1-90 days.
 
         Return ONLY a JSON object with this structure:
@@ -204,7 +287,7 @@ export class GeminiScout {
           "google": ["keyword1", "keyword2", ...],
           "news": ["keyword1", "keyword2", ...],
           "ai_recommendations": [
-            {"keyword": "...", "context": "Brief context on why it's trending"}
+            {"keyword": "...", "context": "Brief context on why it's trending and what type of market it suits (binary or multi-option)"}
           ]
         }
         `;
@@ -221,7 +304,7 @@ export class GeminiScout {
     }
 
     async run(cycles: number = 1, query?: string, count?: number) {
-        console.log(`[Scout] Starting Multi-Horizon Market Scout (${cycles} cycles)... ${query ? `with query: ${query}` : ''}`);
+        console.log(`[Scout] Starting Diverse Market Scout (${cycles} cycles)... ${query ? `with query: ${query}` : ''}`);
 
         const marketsToGenerate = count || 15;
 
@@ -229,7 +312,12 @@ export class GeminiScout {
             const markets = await this.generateMarkets(query, marketsToGenerate);
 
             for (const m of markets) {
-                console.log(`[Scout] Validating: ${m.market_title} (Confidence: ${m.confidence_score})`);
+                const marketType = (m.market_type || 'BINARY').toUpperCase();
+                const label = marketType === 'MULTI' 
+                    ? `[MULTI:${(m.options || []).length}opts]` 
+                    : '[BINARY]';
+                
+                console.log(`[Scout] ${label} Validating: ${m.market_title} (Confidence: ${m.confidence_score})`);
 
                 const resolutionTime = new Date(m.event_resolution_timestamp).getTime();
                 const now = Date.now();
@@ -250,31 +338,58 @@ export class GeminiScout {
                     continue;
                 }
 
+                // Validate multi-option markets have enough options
+                if (marketType === 'MULTI') {
+                    if (!m.options || !Array.isArray(m.options) || m.options.length < 2) {
+                        console.warn(`[Scout] SKIPPING: MULTI market "${m.market_title}" has insufficient options`);
+                        continue;
+                    }
+                }
+
                 // Betting closes 30 minutes before resolution
                 const closureTime = resolutionTime - (30 * 60 * 1000);
 
                 try {
-                    // Logic: Initialize pools based on confidence score and initial probability
-                    const totalLiquidity = Math.floor(m.confidence_score * 2000);
-                    const probYes = m.initial_probability_yes || 0.5;
+                    if (marketType === 'MULTI') {
+                        // Multi-option market creation
+                        const liquidity = m.initial_liquidity || Math.floor((m.confidence_score || 0.85) * 2000);
 
-                    // We want: poolYes / (poolYes + poolNo) = probYes
-                    // So poolYes = totalLiquidity * probYes
-                    const liquidityYes = Math.floor(totalLiquidity * probYes);
-                    const liquidityNo = totalLiquidity - liquidityYes;
+                        const created = await createMarketService(
+                            m.market_title,
+                            closureTime,
+                            0,    // initYes (unused for MULTI)
+                            0,    // initNo (unused for MULTI)
+                            m.source_of_truth,
+                            m.confidence_score,
+                            resolutionTime,
+                            m.category || 'Other',
+                            m.term || 'Short',
+                            'MULTI',
+                            m.options,
+                            undefined, // groupId
+                            liquidity
+                        );
+                        console.log(`[Scout] ✅ Created MULTI Market ID ${created.id} — ${m.options.length} options, ${liquidity} liquidity`);
+                    } else {
+                        // Binary market creation (existing logic)
+                        const totalLiquidity = Math.floor((m.confidence_score || 0.85) * 2000);
+                        const probYes = m.initial_probability_yes || 0.5;
+                        const liquidityYes = Math.floor(totalLiquidity * probYes);
+                        const liquidityNo = totalLiquidity - liquidityYes;
 
-                    const created = await createMarketService(
-                        m.market_title,
-                        closureTime,
-                        liquidityYes,
-                        liquidityNo,
-                        m.source_of_truth,
-                        m.confidence_score,
-                        resolutionTime,
-                        m.category,
-                        m.term
-                    );
-                    console.log(`[Scout] ✅ Created Market ID ${created.id} (Betting closes at ${new Date(closureTime).toLocaleTimeString()})`);
+                        const created = await createMarketService(
+                            m.market_title,
+                            closureTime,
+                            liquidityYes,
+                            liquidityNo,
+                            m.source_of_truth,
+                            m.confidence_score,
+                            resolutionTime,
+                            m.category || 'Other',
+                            m.term || 'Ultra Short'
+                        );
+                        console.log(`[Scout] ✅ Created BINARY Market ID ${created.id} (YES: ${liquidityYes}, NO: ${liquidityNo})`);
+                    }
                 } catch (e) {
                     console.error(`[Scout] ❌ EXECUTE FAILED: ${e}`);
                 }
