@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS wagers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id),
     market_id UUID NOT NULL REFERENCES markets(id),
-    selection VARCHAR(50),
+    selection VARCHAR(100),
     stake DECIMAL(20, 2) NOT NULL CHECK (stake > 0),
     payout DECIMAL(20, 2) DEFAULT 0,
     status VARCHAR(20) DEFAULT 'ACCEPTED',

@@ -12,7 +12,7 @@ export const placeWager = async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Invalid wager parameters' });
     }
 
-    const normalizedSelection = selection.toLowerCase();
+    const normalizedSelection = selection.toLowerCase().substring(0, 100);
 
     const client = await getClient();
 

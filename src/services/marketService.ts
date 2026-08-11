@@ -143,7 +143,7 @@ export const createMarketService = async (
             .replace(/[^a-z0-9 _-]/g, '')  // Remove arrows, commas, special chars
             .replace(/\s+/g, ' ')           // Collapse whitespace
             .trim()
-            .substring(0, 50)               // Enforce VARCHAR(50) limit
+            .substring(0, 100)              // Enforce VARCHAR(100) limit
         || 'option';                        // Fallback if empty after sanitize
 
     // Sanitize options for MULTI markets before any processing
