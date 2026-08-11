@@ -30,6 +30,8 @@ router.get('/stats', adminController.getStatsController);
 router.get('/logs', adminController.listLogs);
 router.post('/scout', adminController.runScout);
 router.post('/scout/preview', adminController.previewScout);
+router.post('/scout/import', adminController.importMarkets);
+router.post('/scout/import/preview', adminController.previewImport);
 router.get('/meta', adminController.getSystemMeta);
 router.get('/webhooks/logs', adminController.listWebhookLogs);
 router.get('/markets/:id/payouts', adminController.getMarketPayoutSummary);

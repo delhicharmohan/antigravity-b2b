@@ -274,6 +274,46 @@ export const previewScout = async (req: Request, res: Response) => {
     }
 };
 
+export const previewImport = async (req: Request, res: Response) => {
+    const { source, count, rewrite } = req.body;
+    try {
+        const scout = new GeminiScout(process.env.GEMINI_API_KEY);
+        const markets = await scout.previewExternalMarkets(
+            source || 'both',
+            count ? Number(count) : 10,
+            rewrite !== false
+        );
+        res.json(markets);
+    } catch (error: any) {
+        console.error('Preview Import Error:', error);
+        res.status(500).json({ error: 'Failed to preview external markets' });
+    }
+};
+
+export const importMarkets = async (req: Request, res: Response) => {
+    const { source, count, rewrite } = req.body;
+    try {
+        const scout = new GeminiScout(process.env.GEMINI_API_KEY);
+        
+        // Run async to avoid timeout
+        scout.importExternalMarkets(
+            source || 'both',
+            count ? Number(count) : 10,
+            rewrite !== false
+        ).then(async (result) => {
+            await query(
+                "INSERT INTO system_meta (key, value) VALUES ('last_import_run', $1) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP",
+                [JSON.stringify({ ...result, timestamp: new Date().toISOString() })]
+            );
+        });
+
+        res.json({ message: `Import initiated from ${source || 'both'}. Markets will appear shortly.` });
+    } catch (error: any) {
+        console.error('Import Markets Error:', error);
+        res.status(500).json({ error: 'Failed to import external markets' });
+    }
+};
+
 export const settleMarketController = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { outcome } = req.body;

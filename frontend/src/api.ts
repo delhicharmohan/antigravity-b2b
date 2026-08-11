@@ -55,6 +55,12 @@ export const adminApi = {
     getMarketPayouts: (id: string) => adminApiInstance.get(`/markets/${id}/payouts`),
     getTrends: () => adminApiInstance.get('/trends'),
 
+    // External Market Import (Kalshi / Polymarket)
+    previewImport: (source?: string, count?: number, rewrite?: boolean) =>
+        adminApiInstance.post('/scout/import/preview', { source: source || 'both', count: count || 10, rewrite: rewrite !== false }),
+    importMarkets: (source?: string, count?: number, rewrite?: boolean) =>
+        adminApiInstance.post('/scout/import', { source: source || 'both', count: count || 10, rewrite: rewrite !== false }),
+
     // Market Groups
     createMarketGroup: (data: { title: string; description?: string; category?: string; image_url?: string }) =>
         adminApiInstance.post('/market-groups', data),

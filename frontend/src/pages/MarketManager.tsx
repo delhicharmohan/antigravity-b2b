@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { adminApi } from '../api';
-import { Plus, Clock, BarChart3, TrendingUp, Sparkles, Edit2, Trash2, X, CalendarX, Check, Layers, List } from 'lucide-react';
+import { Plus, Clock, BarChart3, TrendingUp, Sparkles, Edit2, Trash2, X, CalendarX, Check, Layers, List, Download, Globe } from 'lucide-react';
 
 function Countdown({ timestamp, label, color }: { timestamp: number, label?: string, color?: string }) {
     const [timeLeft, setTimeLeft] = useState('');
@@ -88,6 +88,15 @@ export default function MarketManager() {
     const [marketGroups, setMarketGroups] = useState<any[]>([]);
     const [showGroupModal, setShowGroupModal] = useState(false);
     const [groupFormData, setGroupFormData] = useState({ title: '', description: '', category: 'Other' });
+    // External Import
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importSource, setImportSource] = useState<'both' | 'polymarket' | 'kalshi'>('both');
+    const [importCount, setImportCount] = useState(10);
+    const [importRewrite, setImportRewrite] = useState(true);
+    const [isImporting, setIsImporting] = useState(false);
+    const [importPreviewMarkets, setImportPreviewMarkets] = useState<any[]>([]);
+    const [showImportPreview, setShowImportPreview] = useState(false);
+    const [isSavingImport, setIsSavingImport] = useState(false);
 
     const CATEGORIES = ['Crypto', 'Finance', 'Economy', 'Tech', 'NFL', 'NBA', 'Cricket', 'Football', 'Sports', 'Politics', 'Election', 'Science', 'Weather', 'Geopolitics', 'Culture', 'Other'];
     const TERMS = ['Ultra Short', 'Short', 'Long'];
@@ -174,6 +183,64 @@ export default function MarketManager() {
             console.error(error);
         } finally {
             setLoadingTrends(false);
+        }
+    };
+
+    const handleImportPreview = async () => {
+        setIsImporting(true);
+        try {
+            const res = await adminApi.previewImport(importSource, importCount, importRewrite);
+            setImportPreviewMarkets(res.data);
+            setShowImportModal(false);
+            setShowImportPreview(true);
+        } catch (error) {
+            console.error(error);
+            alert('Failed to fetch external markets');
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const handleSaveImportedMarkets = async () => {
+        setIsSavingImport(true);
+        try {
+            for (const m of importPreviewMarkets) {
+                const resolutionTime = new Date(m.event_resolution_timestamp).getTime();
+                const totalLiquid = m.initial_liquidity || Math.floor((m.confidence_score || 0.85) * 2000);
+                const probYes = m.initial_probability_yes || 0.5;
+                const liqYes = Math.floor(totalLiquid * probYes);
+                const liqNo = totalLiquid - liqYes;
+
+                const durationSeconds = Math.max(60, Math.floor((resolutionTime - Date.now() - (30 * 60 * 1000)) / 1000));
+
+                if (m.market_type === 'MULTI') {
+                    await adminApi.createMarket({
+                        title: m.market_title,
+                        durationSeconds,
+                        market_type: 'MULTI',
+                        options: m.options,
+                        initLiquidity: m.initial_liquidity || 1500,
+                        category: m.category,
+                        term: m.term
+                    });
+                } else {
+                    await adminApi.createMarket({
+                        title: m.market_title,
+                        durationSeconds,
+                        initYes: liqYes,
+                        initNo: liqNo,
+                        category: m.category,
+                        term: m.term
+                    });
+                }
+            }
+            setShowImportPreview(false);
+            fetchMarkets();
+        } catch (error) {
+            console.error(error);
+            alert('Failed to save some imported markets');
+        } finally {
+            setIsSavingImport(false);
         }
     };
 
@@ -412,6 +479,14 @@ export default function MarketManager() {
                                 {isRunning ? 'Scouting...' : 'Run Scout'}
                             </button>
                         </div>
+                        <button
+                            onClick={() => setShowImportModal(true)}
+                            className="btn-premium"
+                            style={{ padding: '0.6rem 1rem', fontSize: '0.85rem', whiteSpace: 'nowrap', background: 'linear-gradient(135deg, #059669, #10b981)' }}
+                        >
+                            <Download size={16} />
+                            Import Markets
+                        </button>
                         {lastRun && (
                             <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
                                 Last ran: {new Date(lastRun).toLocaleTimeString()}
@@ -1049,6 +1124,195 @@ export default function MarketManager() {
                                 className="btn-premium"
                             >
                                 {isSavingAll ? 'Saving Markets...' : `Save All ${scoutPreviewMarkets.length} Markets`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Import Settings Modal */}
+            {showImportModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="glass-card animate-slide-up" style={{ width: '500px', padding: '2rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+                            <div>
+                                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Globe size={20} color="#10b981" />
+                                    Import from External Platforms
+                                </h3>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pull live markets from Kalshi & Polymarket</p>
+                            </div>
+                            <button onClick={() => setShowImportModal(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                            <div>
+                                <label className="label">Source Platform</label>
+                                <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                    {(['both', 'polymarket', 'kalshi'] as const).map(s => (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            onClick={() => setImportSource(s)}
+                                            style={{
+                                                flex: 1, padding: '0.6rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                                                border: 'none', borderLeft: s !== 'both' ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                                                background: importSource === s ? 'linear-gradient(135deg, #059669, #10b981)' : 'rgba(255,255,255,0.03)',
+                                                color: importSource === s ? 'white' : 'var(--text-muted)',
+                                                textTransform: 'capitalize'
+                                            }}
+                                        >
+                                            {s === 'both' ? '🌐 Both' : s === 'polymarket' ? '🟣 Polymarket' : '🔵 Kalshi'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div>
+                                    <label className="label">Number of Markets</label>
+                                    <select
+                                        className="input-glow"
+                                        style={{ background: 'var(--bg-card)', color: 'var(--text-white)' }}
+                                        value={importCount}
+                                        onChange={e => setImportCount(Number(e.target.value))}
+                                    >
+                                        <option value={5}>5 markets</option>
+                                        <option value={10}>10 markets</option>
+                                        <option value={15}>15 markets</option>
+                                        <option value={20}>20 markets</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="label">AI Rewrite</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => setImportRewrite(!importRewrite)}
+                                        style={{
+                                            width: '100%', padding: '0.6rem', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                                            border: '1px solid',
+                                            borderColor: importRewrite ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255,255,255,0.1)',
+                                            background: importRewrite ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.03)',
+                                            color: importRewrite ? '#10b981' : 'var(--text-muted)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
+                                        }}
+                                    >
+                                        <Sparkles size={14} />
+                                        {importRewrite ? '🇮🇳 Indian Rewrite ON' : 'Raw Import'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {importRewrite && (
+                                <div style={{ padding: '0.75rem', background: 'rgba(16, 185, 129, 0.05)', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.1)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                    <strong style={{ color: '#10b981' }}>AI Rewrite enabled:</strong> Gemini will adapt market titles for Indian audience, assign categories, and set appropriate confidence scores.
+                                </div>
+                            )}
+
+                            <button
+                                onClick={handleImportPreview}
+                                disabled={isImporting}
+                                className="btn-premium"
+                                style={{ justifyContent: 'center', background: 'linear-gradient(135deg, #059669, #10b981)', marginTop: '0.5rem' }}
+                            >
+                                <Download size={16} />
+                                {isImporting ? 'Fetching Markets...' : 'Preview Import'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Import Preview Modal */}
+            {showImportPreview && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="glass-card animate-scale-up" style={{ width: '1000px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ padding: '2rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <Globe size={24} color="#10b981" />
+                                    Import Preview
+                                </h2>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Review markets from Kalshi & Polymarket before importing</p>
+                            </div>
+                            <button onClick={() => setShowImportPreview(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={24} /></button>
+                        </div>
+
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {importPreviewMarkets.map((m, idx) => (
+                                    <div key={idx} className="glass-card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', display: 'grid', gridTemplateColumns: '1fr 150px 150px 80px', gap: '1rem', alignItems: 'center' }}>
+                                        <div>
+                                            <input
+                                                className="input-glow"
+                                                style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem' }}
+                                                value={m.market_title}
+                                                onChange={e => {
+                                                    const newMarkets = [...importPreviewMarkets];
+                                                    newMarkets[idx].market_title = e.target.value;
+                                                    setImportPreviewMarkets(newMarkets);
+                                                }}
+                                            />
+                                            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                {m.market_type === 'MULTI' ? (
+                                                    <span style={{ color: '#fbbf24' }}>MULTI · {(m.options || []).length} options</span>
+                                                ) : (
+                                                    <span>Probability: {((m.initial_probability_yes || 0.5) * 100).toFixed(0)}% YES</span>
+                                                )}
+                                                <span>Confidence: {((m.confidence_score || 0.85) * 100).toFixed(0)}%</span>
+                                                <span>Resolves: {new Date(m.event_resolution_timestamp).toLocaleDateString()}</span>
+                                                {m.source_of_truth && (
+                                                    <a href={m.source_of_truth} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>Source ↗</a>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <select
+                                            className="input-glow"
+                                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', background: 'var(--bg-dark)' }}
+                                            value={m.category}
+                                            onChange={e => {
+                                                const newMarkets = [...importPreviewMarkets];
+                                                newMarkets[idx].category = e.target.value;
+                                                setImportPreviewMarkets(newMarkets);
+                                            }}
+                                        >
+                                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <select
+                                            className="input-glow"
+                                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', background: 'var(--bg-dark)' }}
+                                            value={m.term}
+                                            onChange={e => {
+                                                const newMarkets = [...importPreviewMarkets];
+                                                newMarkets[idx].term = e.target.value;
+                                                setImportPreviewMarkets(newMarkets);
+                                            }}
+                                        >
+                                            {TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+                                        </select>
+                                        <button
+                                            onClick={() => {
+                                                const newMarkets = importPreviewMarkets.filter((_, i) => i !== idx);
+                                                setImportPreviewMarkets(newMarkets);
+                                            }}
+                                            style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                                        >
+                                            <Trash2 size={20} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '2rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                            <button onClick={() => setShowImportPreview(false)} className="btn-premium" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>Cancel</button>
+                            <button
+                                onClick={handleSaveImportedMarkets}
+                                disabled={isSavingImport || importPreviewMarkets.length === 0}
+                                className="btn-premium"
+                                style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}
+                            >
+                                {isSavingImport ? 'Importing...' : `Import All ${importPreviewMarkets.length} Markets`}
                             </button>
                         </div>
                     </div>

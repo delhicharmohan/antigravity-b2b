@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createMarketService } from "../services/marketService";
 import { extractJson } from "../utils/jsonUtils";
+import { MarketFetcher, ExternalMarket } from "./marketFetcher";
 
 // Mock response for fallback
 const MOCK_MARKETS = [
@@ -397,4 +398,240 @@ export class GeminiScout {
         }
         console.log("[Scout] Mission Complete.");
     }
+
+    /**
+     * Import markets from Kalshi and/or Polymarket, optionally rewriting for Indian audience via Gemini.
+     */
+    async importExternalMarkets(
+        source: 'polymarket' | 'kalshi' | 'both' = 'both',
+        count: number = 10,
+        rewrite: boolean = true
+    ): Promise<{ imported: number; skipped: number; markets: any[] }> {
+        const fetcher = new MarketFetcher();
+        let externalMarkets: ExternalMarket[] = [];
+
+        console.log(`[Scout] Importing from ${source} (count: ${count}, rewrite: ${rewrite})...`);
+
+        if (source === 'polymarket') {
+            externalMarkets = await fetcher.fetchPolymarket(count);
+        } else if (source === 'kalshi') {
+            externalMarkets = await fetcher.fetchKalshi(count);
+        } else {
+            externalMarkets = await fetcher.fetchAll(count);
+        }
+
+        if (externalMarkets.length === 0) {
+            console.log('[Scout] No external markets found.');
+            return { imported: 0, skipped: 0, markets: [] };
+        }
+
+        // Cap to requested count
+        externalMarkets = externalMarkets.slice(0, count);
+
+        let adaptedMarkets: any[];
+
+        if (rewrite && this.model) {
+            // Use Gemini to rewrite titles for Indian market
+            adaptedMarkets = await this.rewriteForIndianMarket(externalMarkets);
+        } else {
+            // Direct mapping without AI rewrite
+            adaptedMarkets = externalMarkets.map(m => this.directMap(m));
+        }
+
+        // Create markets
+        let imported = 0;
+        let skipped = 0;
+        const createdMarkets: any[] = [];
+
+        for (const m of adaptedMarkets) {
+            const resolutionTime = new Date(m.event_resolution_timestamp).getTime();
+            const now = Date.now();
+
+            // Validation
+            if (isNaN(resolutionTime) || resolutionTime < now) {
+                console.warn(`[Scout] SKIP (bad date): ${m.market_title}`);
+                skipped++;
+                continue;
+            }
+
+            if (resolutionTime > now + 90 * 24 * 60 * 60 * 1000) {
+                console.warn(`[Scout] SKIP (>90 days): ${m.market_title}`);
+                skipped++;
+                continue;
+            }
+
+            const marketType = (m.market_type || 'BINARY').toUpperCase();
+            if (marketType === 'MULTI' && (!m.options || m.options.length < 2)) {
+                console.warn(`[Scout] SKIP (insufficient options): ${m.market_title}`);
+                skipped++;
+                continue;
+            }
+
+            const closureTime = resolutionTime - (30 * 60 * 1000);
+
+            try {
+                if (marketType === 'MULTI') {
+                    const liquidity = m.initial_liquidity || 1500;
+                    const created = await createMarketService(
+                        m.market_title,
+                        closureTime,
+                        0, 0,
+                        m.source_of_truth || 'External Import',
+                        m.confidence_score || 0.85,
+                        resolutionTime,
+                        m.category || 'Other',
+                        m.term || 'Short',
+                        'MULTI',
+                        m.options,
+                        undefined,
+                        liquidity
+                    );
+                    console.log(`[Scout] ✅ Imported MULTI: ${m.market_title} (${m.options.length} options)`);
+                    createdMarkets.push(created);
+                    imported++;
+                } else {
+                    const totalLiquidity = m.initial_liquidity || 1500;
+                    const probYes = m.initial_probability_yes || 0.5;
+                    const liquidityYes = Math.floor(totalLiquidity * probYes);
+                    const liquidityNo = totalLiquidity - liquidityYes;
+
+                    const created = await createMarketService(
+                        m.market_title,
+                        closureTime,
+                        liquidityYes,
+                        liquidityNo,
+                        m.source_of_truth || 'External Import',
+                        m.confidence_score || 0.85,
+                        resolutionTime,
+                        m.category || 'Other',
+                        m.term || 'Short'
+                    );
+                    console.log(`[Scout] ✅ Imported BINARY: ${m.market_title} (YES: ${liquidityYes}, NO: ${liquidityNo})`);
+                    createdMarkets.push(created);
+                    imported++;
+                }
+            } catch (e: any) {
+                console.error(`[Scout] ❌ Import failed: ${m.market_title} — ${e.message}`);
+                skipped++;
+            }
+        }
+
+        console.log(`[Scout] Import complete. Imported: ${imported}, Skipped: ${skipped}`);
+        return { imported, skipped, markets: createdMarkets };
+    }
+
+    /**
+     * Preview external markets without creating them (for frontend review)
+     */
+    async previewExternalMarkets(
+        source: 'polymarket' | 'kalshi' | 'both' = 'both',
+        count: number = 10,
+        rewrite: boolean = true
+    ): Promise<any[]> {
+        const fetcher = new MarketFetcher();
+        let externalMarkets: ExternalMarket[] = [];
+
+        if (source === 'polymarket') {
+            externalMarkets = await fetcher.fetchPolymarket(count);
+        } else if (source === 'kalshi') {
+            externalMarkets = await fetcher.fetchKalshi(count);
+        } else {
+            externalMarkets = await fetcher.fetchAll(count);
+        }
+
+        externalMarkets = externalMarkets.slice(0, count);
+
+        if (rewrite && this.model) {
+            return await this.rewriteForIndianMarket(externalMarkets);
+        }
+
+        return externalMarkets.map(m => this.directMap(m));
+    }
+
+    /**
+     * Rewrite external markets using Gemini AI for the Indian market
+     */
+    private async rewriteForIndianMarket(externalMarkets: ExternalMarket[]): Promise<any[]> {
+        const marketSummaries = externalMarkets.map(m => ({
+            title: m.title,
+            type: m.type,
+            options: m.options,
+            endDate: m.endDate,
+            odds: m.currentOdds,
+            source: m.source,
+            url: m.url
+        }));
+
+        const prompt = `
+        You are an expert Prediction Market Analyst adapting markets for an INDIAN audience.
+        
+        Below are real markets from Polymarket and Kalshi. Your job is to:
+        1. REWRITE titles to be engaging for Indian users (use ₹ instead of $, reference Indian context where applicable)
+        2. Keep the core question intact — don't change the actual prediction
+        3. Assign appropriate categories from: Crypto, Finance, Economy, Tech, NFL, NBA, Cricket, Football, Sports, Politics, Election, Science, Weather, Geopolitics, Culture, Other
+        4. Assign terms: "Ultra Short" (≤7 days), "Short" (8-21 days), "Long" (22-90 days)
+        5. Set confidence_score between 0.80-0.95 (these are real markets, so high confidence)
+        6. For BINARY: set initial_probability_yes from the odds data
+        7. For MULTI: keep options array, set initial_liquidity (1000-2000)
+        
+        SOURCE MARKETS:
+        ${JSON.stringify(marketSummaries, null, 2)}
+        
+        Return ONLY a JSON array. Each item must have:
+        {
+            "market_type": "BINARY" or "MULTI",
+            "market_title": "Rewritten engaging title",
+            "event_resolution_timestamp": "ISO8601 from endDate",
+            "source_of_truth": "URL from source market",
+            "confidence_score": 0.85-0.95,
+            "category": "Category",
+            "term": "Ultra Short" | "Short" | "Long",
+            "initial_probability_yes": 0.xx (BINARY only),
+            "options": ["opt1", "opt2", ...] (MULTI only),
+            "initial_liquidity": 1500 (MULTI only)
+        }
+        `;
+
+        try {
+            console.log(`[Scout] Rewriting ${externalMarkets.length} markets for Indian audience...`);
+            const result = await this.model.generateContent(prompt);
+            const text = result.response.text();
+            const adapted = extractJson(text);
+            console.log(`[Scout] AI rewrite complete — ${adapted.length} markets adapted`);
+            return adapted;
+        } catch (error: any) {
+            console.error(`[Scout] AI rewrite failed, falling back to direct mapping:`, error.message);
+            return externalMarkets.map(m => this.directMap(m));
+        }
+    }
+
+    /**
+     * Direct mapping from ExternalMarket to internal format (no AI)
+     */
+    private directMap(m: ExternalMarket): any {
+        const now = Date.now();
+        const endMs = new Date(m.endDate).getTime();
+        const daysToEnd = (endMs - now) / (1000 * 60 * 60 * 24);
+        const term = daysToEnd <= 7 ? 'Ultra Short' : daysToEnd <= 21 ? 'Short' : 'Long';
+
+        const base: any = {
+            market_type: m.type,
+            market_title: m.title,
+            event_resolution_timestamp: m.endDate,
+            source_of_truth: m.sourceOfTruth,
+            confidence_score: 0.90,
+            category: m.category || 'Other',
+            term
+        };
+
+        if (m.type === 'MULTI') {
+            base.options = m.options;
+            base.initial_liquidity = Math.min(2000, Math.max(1000, Math.floor(m.volume / 100)));
+        } else {
+            base.initial_probability_yes = m.currentOdds.yes || 0.5;
+        }
+
+        return base;
+    }
 }
+
