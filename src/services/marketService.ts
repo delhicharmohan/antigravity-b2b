@@ -155,9 +155,9 @@ export const createMarketService = async (
     }
 
     const result = await query(
-        `INSERT INTO markets (title, status, closure_timestamp, resolution_timestamp, pool_yes, pool_no, pools, total_pool, source_of_truth, confidence_score, category, term, market_type, options, group_id) 
-         VALUES ($1, 'OPEN', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
-        [title, closureTime, resolutionTime, poolYes, poolNo, JSON.stringify(pools), totalPool, sourceOfTruth, confidenceScore, category, term, marketType, JSON.stringify(options), groupId || null]
+        `INSERT INTO markets (title, status, closure_timestamp, resolution_timestamp, pool_yes, pool_no, pools, source_of_truth, confidence_score, category, term, market_type, options, group_id) 
+         VALUES ($1, 'OPEN', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+        [title, closureTime, resolutionTime, poolYes, poolNo, JSON.stringify(pools), sourceOfTruth, confidenceScore, category, term, marketType, JSON.stringify(options), groupId || null]
     );
 
     const newMarket = result.rows[0];
