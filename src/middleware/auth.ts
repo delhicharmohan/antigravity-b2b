@@ -42,22 +42,12 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
     try {
         // 1. Verify API Key exists (Lookup by hash)
         const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-        console.log(`[Auth Debug] Incoming Key: ${apiKey}, Hash: ${apiKeyHash}`);
-
-        const allMerchants = await query('SELECT id, api_key_hash FROM merchants');
-        console.log('[Auth Debug] Available Hashes:', allMerchants.rows.map(m => m.api_key_hash));
 
         const result = await query('SELECT * FROM merchants WHERE api_key_hash = $1', [apiKeyHash]);
 
         if (result.rows.length === 0) {
-            const allHashes = await query('SELECT api_key_hash FROM merchants');
             return res.status(403).json({
-                error: 'Invalid API Key',
-                debug: {
-                    sentKey: apiKey,
-                    sentHash: apiKeyHash,
-                    availableHashes: allHashes.rows.map(r => r.api_key_hash)
-                }
+                error: 'Invalid API Key'
             });
         }
 
@@ -80,7 +70,7 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
             });
 
             if (!isAllowed) {
-                console.warn(`[Blocked] Unauthorized IP ${clientIp} for Merchant ${merchant.id}`);
+                await LoggerService.warn(`[Blocked] Unauthorized IP ${clientIp} for Merchant ${merchant.id}`);
                 return res.status(403).json({
                     error: 'IP Address not whitelisted',
                     detectedIp: clientIp
@@ -110,8 +100,8 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
 
         req.merchant = merchant;
         next();
-    } catch (error) {
-        console.error('Authentication Error:', error);
+    } catch (error: any) {
+        await LoggerService.error('Authentication Error:', { error: error.message, stack: error.stack });
         res.status(500).json({ error: 'Internal Server Error during Authentication' });
     }
 };
