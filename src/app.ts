@@ -1,11 +1,22 @@
+// External Libraries
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import dotenv from 'dotenv';
 import path from 'path';
+import dotenv from 'dotenv';
 
+// Service Imports
+import { LoggerService } from './services/loggerService';
+import { initSocket } from './services/socketService';
+import { SchedulerService } from './services/schedulerService';
+
+// Route Imports
+import v1Routes from './routes/v1';
+import adminRoutes from './routes/admin';
+
+// Load Environment Variables
 dotenv.config();
 
 // Service Imports
