@@ -288,6 +288,17 @@ export const settleMarket = async (marketId: string, outcome: string) => {
         const wagersRes = await client.query('SELECT * FROM wagers WHERE market_id = $1', [marketId]);
         const wagers = wagersRes.rows;
 
+        // Optimize: Bulk fetch merchant configs to prevent N+1 queries
+        const merchantIds = [...new Set(wagers.map(w => w.merchant_id))];
+        const merchantConfigMap = new Map();
+
+        if (merchantIds.length > 0) {
+            const merchantsRes = await client.query('SELECT id, config FROM merchants WHERE id = ANY($1)', [merchantIds]);
+            for (const row of merchantsRes.rows) {
+                merchantConfigMap.set(row.id, row.config);
+            }
+        }
+
         // 3. Calculate and update payouts
         let totalPayoutsCalculated = 0;
 
@@ -295,8 +306,8 @@ export const settleMarket = async (marketId: string, outcome: string) => {
             let payout = 0;
             if (wager.selection === normalizedOutcome) {
                 // Fetch merchant rake
-                const merchantRes = await client.query('SELECT config FROM merchants WHERE id = $1', [wager.merchant_id]);
-                const rake = merchantRes.rows[0]?.config?.default_rake;
+                const config = merchantConfigMap.get(wager.merchant_id);
+                const rake = config?.default_rake;
 
                 payout = Totalisator.calculatePotentialPayout(Number(wager.stake), poolData, normalizedOutcome, rake);
                 totalPayoutsCalculated += payout;
